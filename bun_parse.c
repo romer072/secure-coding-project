@@ -9,7 +9,7 @@
  * Example helper: convert 4 bytes in `buf`, positioned at `offset`,
  * into a little-endian u32.
  */
-static u16_read_u16_le(const u8 *buf, size_t offset) {
+static u16 read_u16_le(const u8 *buf, size_t offset) {
   return (u16)buf[offset]
      | (u16)buf[offset + 1] << 8;
 }
@@ -101,7 +101,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
     header->version_minor != BUN_VERSION_MINOR) {
   return BUN_UNSUPPORTED;
   }
-  
+
   return BUN_OK;
 }
 
