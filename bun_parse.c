@@ -9,11 +9,29 @@
  * Example helper: convert 4 bytes in `buf`, positioned at `offset`,
  * into a little-endian u32.
  */
+static u16_read_u16_le(const u8 *buf, size_t offset) {
+  return (u16)buf[offset]
+     | (u16)buf[offset + 1] << 8;
+}
+
+// add u16 and u64 read because the BUN file stores multi-byte integers in little-endian format.
+
 static u32 read_u32_le(const u8 *buf, size_t offset) {
   return (u32)buf[offset]
      | (u32)buf[offset + 1] << 8
      | (u32)buf[offset + 2] << 16
      | (u32)buf[offset + 3] << 24;
+}
+
+static u64 read_u64_le(const u8 *buf, size_t offset) {
+  return (u64)buf[offset]
+     | (u64)buf[offset + 1] << 8
+     | (u64)buf[offset + 2] << 16
+     | (u64)buf[offset + 3] << 24
+     | (u64)buf[offset + 4] << 32
+     | (u64)buf[offset + 5] << 40
+     | (u64)buf[offset + 6] << 48
+     | (u64)buf[offset + 7] << 56;
 }
 
 //
@@ -60,14 +78,30 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   }
 
   // TODO: populate `header` from `buf`.
+  header->magic               = read_u32_le(buf, 0);
+  header->version_major       = read_u16_le(buf, 4);
+  header->version_minor       = read_u16_le(buf, 6);
+  header->asset_count         = read_u32_le(buf, 8);
+  header->asset_table_offset  = read_u64_le(buf, 12);
+  header->string_table_offset = read_u64_le(buf, 20);
+  header->string_table_size   = read_u64_le(buf, 28);
+  header->data_section_offset = read_u64_le(buf, 36);
+  header->data_section_size   = read_u64_le(buf, 44);
+  header->reserved            = read_u64_le(buf, 52);
 
   // TODO: validate fields and return BUN_MALFORMED or BUN_UNSUPPORTED
+
   // as required by the spec. The magic check is a good place to start.
 
   if (header->magic != BUN_MAGIC) {
     return BUN_MALFORMED;
   }
 
+  if (header->version_major != BUN_VERSION_MAJOR ||
+    header->version_minor != BUN_VERSION_MINOR) {
+  return BUN_UNSUPPORTED;
+  }
+  
   return BUN_OK;
 }
 
