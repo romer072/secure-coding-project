@@ -177,6 +177,19 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
   // TODO: implement asset record parsing and validation
+    int bun_read_asset(File *file,BunAssetrecord *idx){
+    //can't use fread(), read field by field
+    if (!(read_u32_le(buf, &idx->name_offset) &&
+      read_u32_le(buf, &idx->name_length) &&
+      read_u64_le(buf, &idx->data_offset)&&
+      read_u64_le(buf, &idx->data_size)&&
+      read_u64_le(buf, &idx->uncompressed_size)&&
+      read_u32_le(buf, &idx->compression)&&
+      read_u32_le(buf, &idx->type)&&
+      read_u32_le(buf, &idx->checksum )&&
+      read_u32_le(buf, &idx->flags)))
+      return 1;
+  }
 
   return BUN_OK;
 }
