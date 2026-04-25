@@ -36,6 +36,20 @@ static u64 read_u64_le(const u8 *buf, size_t offset) {
 
 //
 // API implementation
+void bun_add_violation(BunParseContext *ctx, const char *message) {
+  if (ctx->violation_count >= BUN_MAX_VIOLATIONS) {
+    return;
+  }
+
+  strncpy(ctx->violations[ctx->violation_count].message,
+          message,
+          BUN_MAX_VIOLATION_LEN - 1);
+
+  ctx->violations[ctx->violation_count].message[BUN_MAX_VIOLATION_LEN - 1] = '\0';
+  ctx->violation_count++;
+}
+//this function safely stores one validation error message in ctx, so later main.c can print all violations instead of the parser immediately printing to stderr.
+
 static int checked_add_u64(u64 a, u64 b, u64 *result) {
   if (UINT64_MAX - a < b) {
     return 0; // overflow
@@ -177,6 +191,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
   // TODO: implement asset record parsing and validation
+  
 
   return BUN_OK;
 }

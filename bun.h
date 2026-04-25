@@ -2,6 +2,7 @@
 #define BUN_H
 
 #include <stdint.h>
+#include <stddef.h> 
 #include <stdio.h>
 
 //
@@ -73,21 +74,28 @@ typedef struct {
 //
 // Parse context
 //
-// A struct to store information about the state of your parser (rather than
-// passing multiple arguments to every function).
-//
-// You will likely want to add fields to it as your implementation grows.
-//
+#define BUN_MAX_VIOLATIONS 100
+#define BUN_MAX_VIOLATION_LEN 256
+
+typedef struct {
+    char description[BUN_MAX_VIOLATION_LEN];
+} BunViolation;
 
 typedef struct {
     FILE   *file;           // open file handle
     long    file_size;      // total file size in bytes
     // add further fields here as needed
+
+    BunViolation violations[BUN_MAX_VIOLATIONS];
+    size_t violation_count;
 } BunParseContext;
 
 //
 // Public API
 //
+void bun_add_violation(BunParseContext *ctx, const char *message);
+// This gives the parser one clean helper function for recording errors, instead of manually copying strings into the violation array everywhere.
+
 // The function declarations below define the public API for your parser;
 // you implement them in the `bun_parse.c` file.
 //
