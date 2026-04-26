@@ -188,7 +188,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       read_u32_le(buf, &idx->type)&&
       read_u32_le(buf, &idx->checksum )&&
       read_u32_le(buf, &idx->flags)))
-      return 1;
+      return 0;
   }
 
   return BUN_OK;
