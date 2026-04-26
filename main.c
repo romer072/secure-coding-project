@@ -5,7 +5,14 @@
 
 #include "bun.h"
 
-// Helper: check if data is printable ASCII
+/**
+ * Check if data contains only printable ASCII characters (bytes 32-126).
+ * Used to determine whether to display data as text or hex dump.
+ * 
+ * @param data   Pointer to data buffer
+ * @param size   Number of bytes to check
+ * @return       1 if all bytes are printable ASCII, 0 otherwise
+ */
 static int is_printable_ascii(const u8 *data, size_t size) {
     for (size_t i = 0; i < size; i++) {
         if (data[i] < 32 || data[i] > 126) {
@@ -15,7 +22,13 @@ static int is_printable_ascii(const u8 *data, size_t size) {
     return 1;
 }
 
-// Helper: print hex dump (max 60 bytes)
+/**
+ * Print a hex dump of binary data (max 60 bytes).
+ * Used for non-printable data such as images or compressed content.
+ * 
+ * @param data   Pointer to data buffer
+ * @param size   Number of bytes to print
+ */
 static void print_hex_dump(const u8 *data, size_t size) {
     size_t len = size < 60 ? size : 60;
     printf("  Data (hex): ");
@@ -28,7 +41,13 @@ static void print_hex_dump(const u8 *data, size_t size) {
     printf("\n");
 }
 
-// Helper: print text preview (max 60 bytes)
+/**
+ * Print a text preview of data (max 60 bytes).
+ * Escapes special characters (", \, \n, \r, \t) for safe display.
+ * 
+ * @param data   Pointer to data buffer
+ * @param size   Number of bytes to print
+ */
 static void print_text_preview(const u8 *data, size_t size) {
     size_t len = size < 60 ? size : 60;
     printf("  Data: \"");
@@ -52,22 +71,33 @@ static void print_text_preview(const u8 *data, size_t size) {
     printf("\"\n");
 }
 
+/**
+ * Main entry point for the BUN file parser.
+ * 
+ * @param argc   Number of command-line arguments
+ * @param argv   Array of command-line argument strings
+ * @return       Exit code (0=success, 1=malformed, 2=unsupported, 3+=error)
+ */
 int main(int argc, char *argv[]) {
+  // Validate command-line arguments
   if (argc != 2) {
     fprintf(stderr, "Usage: %s <file.bun>\n", argv[0]);
     return BUN_ERR_IO;
   }
   const char *path = argv[1];
 
+  // Initialize parse context and header structure
   BunParseContext ctx = {0};
   BunHeader header  = {0};
 
+  // Open the BUN file
   bun_result_t result = bun_open(path, &ctx);
   if (result != BUN_OK) {
     fprintf(stderr, "Error: could not open '%s'\n", path);
     return result;
   }
 
+  // Parse and validate the BUN header
   result = bun_parse_header(&ctx, &header);
   if (result != BUN_OK) {
     fprintf(stderr, "Error: header invalid or unsupported (code %d)\n", result);
@@ -75,8 +105,10 @@ int main(int argc, char *argv[]) {
     return result;
   }
 
+  // Parse asset records
   result = bun_parse_assets(&ctx, &header);
 
+  // Handle parsing results
   if (result == BUN_OK) {
     // === Print all header fields ===
     printf("=== BUN File Header ===\n");
@@ -92,6 +124,7 @@ int main(int argc, char *argv[]) {
     printf("\n");
 
     // Read string table into memory
+    // The string table stores asset names as a contiguous buffer
     char *string_table = (char *)malloc((size_t)header.string_table_size + 1);
     if (string_table == NULL) {
         fprintf(stderr, "Error: could not allocate string table\n");
@@ -103,6 +136,7 @@ int main(int argc, char *argv[]) {
     string_table[header.string_table_size] = '\0';
 
     // Read data section into memory
+    // The data section stores the actual payload data for each asset
     u8 *data_section = (u8 *)malloc((size_t)header.data_section_size + 1);
     if (data_section == NULL) {
         free(string_table);
@@ -114,6 +148,8 @@ int main(int argc, char *argv[]) {
     fread(data_section, 1, (size_t)header.data_section_size, ctx.file);
 
     // === Re-read asset records and print ===
+    // We re-read the asset table because bun_parse_assets() doesn't store
+    // the parsed records for us to access. Each asset record is 48 bytes.
     printf("=== Asset Records ===\n");
     fseek(ctx.file, (long)header.asset_table_offset, SEEK_SET);
 
@@ -124,6 +160,7 @@ int main(int argc, char *argv[]) {
             break;
         }
 
+        // Parse asset record fields (little-endian)
         u32 name_offset       = read_u32_le(buf, 0);
         u32 name_length       = read_u32_le(buf, 4);
         u64 data_offset       = read_u64_le(buf, 8);
@@ -136,6 +173,7 @@ int main(int argc, char *argv[]) {
 
         printf("\nAsset %u:\n", i);
         // Name (max 60 chars)
+        // Asset names are stored in the string table, referenced by offset/length
         printf("  Name: \"");
         size_t name_len = name_length < 60 ? name_length : 60;
         for (u32 j = 0; j < name_len; j++) {
@@ -168,6 +206,7 @@ int main(int argc, char *argv[]) {
         printf("  Flags: 0x%08x\n", flags);
 
         // Data preview (max 60 bytes)
+        // Display as text if printable ASCII, otherwise hex dump
         if (data_size > 0 && data_offset < header.data_section_size) {
             u64 data_end = data_offset + data_size;
             if (data_end <= header.data_section_size) {
@@ -180,6 +219,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Clean up allocated memory
     free(data_section);
     free(string_table);
 
@@ -191,6 +231,7 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Error: I/O error while parsing\n");
   }
 
+  // Close the BUN file and return the result code
   bun_close(&ctx);
   return result;
 }
