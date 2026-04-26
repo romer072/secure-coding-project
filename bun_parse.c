@@ -175,24 +175,65 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 }
 
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
+  if (ctx == NULL || header == NULL || ctx->file == NULL) {
+      return BUN_MALFORMED;
+  }
 
-  // TODO: implement asset record parsing and validation
-    int bun_read_asset(File *file,BunAssetrecord *idx){
-    //can't use fread(), read field by field
-    if (!(read_u32_le(buf, &idx->name_offset) &&
-      read_u32_le(buf, &idx->name_length) &&
-      read_u64_le(buf, &idx->data_offset)&&
-      read_u64_le(buf, &idx->data_size)&&
-      read_u64_le(buf, &idx->uncompressed_size)&&
-      read_u32_le(buf, &idx->compression)&&
-      read_u32_le(buf, &idx->type)&&
-      read_u32_le(buf, &idx->checksum )&&
-      read_u32_le(buf, &idx->flags)))
-      return 1;
+  u64 file_size = (u64)ctx->file_size;
+  u64 asset_table_size = 0;
+
+  if (!checked_mul_u64((u64)header->asset_count,
+                       (u64)BUN_ASSET_RECORD_SIZE,
+                       &asset_table_size)) {
+      return BUN_MALFORMED;
+  }
+
+  if (!range_within_file(header->asset_table_offset, asset_table_size, file_size)) {
+      return BUN_MALFORMED;
+  }
+
+  if (fseek(ctx->file, (long)header->asset_table_offset, SEEK_SET) != 0) {
+      return BUN_ERR_IO;
+  }
+
+  for (u32 i = 0; i < header->asset_count; i++) {
+      u8 buf[BUN_ASSET_RECORD_SIZE];
+      BunAssetRecord curr;
+
+      if (fread(buf, 1, BUN_ASSET_RECORD_SIZE, ctx->file) != BUN_ASSET_RECORD_SIZE) {
+          return BUN_ERR_IO;
+      }
+
+      curr.name_offset       = read_u32_le(buf, 0);
+      curr.name_length       = read_u32_le(buf, 4);
+      curr.data_offset       = read_u64_le(buf, 8);
+      curr.data_size         = read_u64_le(buf, 16);
+      curr.uncompressed_size = read_u64_le(buf, 24);
+      curr.compression       = read_u32_le(buf, 32);
+      curr.type              = read_u32_le(buf, 36);
+      curr.checksum          = read_u32_le(buf, 40);
+      curr.flags             = read_u32_le(buf, 44);
+
+      if (!range_within_file((u64)curr.name_offset, (u64)curr.name_length, header->string_table_size)) {
+          return BUN_MALFORMED;
+      }
+
+      if (!range_within_file(curr.data_offset, curr.data_size, header->data_section_size)) {
+          return BUN_MALFORMED;
+      }
+
+      if (curr.compression != 0) {
+          return BUN_UNSUPPORTED;
+      }
+
+      if (curr.checksum != 0) {
+          return BUN_UNSUPPORTED;
+      }
   }
 
   return BUN_OK;
 }
+
 
 bun_result_t bun_close(BunParseContext *ctx) {
   assert(ctx->file);
