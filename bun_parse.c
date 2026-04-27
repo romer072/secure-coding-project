@@ -229,8 +229,6 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       if (curr.checksum != 0) {
           return BUN_UNSUPPORTED;
       }
-    
-
   return BUN_OK;
 }
 
