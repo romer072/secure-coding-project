@@ -93,20 +93,7 @@ typedef struct {
 //
 // Public API
 //
-void bun_add_violation(BunParseContext *ctx, const char *message) {
-  if (ctx->violation_count >= BUN_MAX_VIOLATIONS) {
-    return;
-  }
-
-
-  strncpy(ctx->violations[ctx->violation_count].message,
-          message,
-          BUN_MAX_VIOLATION_LEN - 1);
-
-
-  ctx->violations[ctx->violation_count].message[BUN_MAX_VIOLATION_LEN - 1] = '\0';
-  ctx->violation_count++;
-}
+void bun_add_violation(BunParseContext *ctx, const char *message);
 //this function safely stores one validation error message in ctx, so later main.c can print all violations instead of the parser immediately printing to stderr.
 
 // This gives the parser one clean helper function for recording errors, instead of manually copying strings into the violation array everywhere.
