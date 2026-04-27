@@ -9,21 +9,21 @@
  * Example helper: convert 4 bytes in `buf`, positioned at `offset`,
  * into a little-endian u32.
  */
-static u16 read_u16_le(const u8 *buf, size_t offset) {
+u16 read_u16_le(const u8 *buf, size_t offset) {
   return (u16)buf[offset]
      | (u16)buf[offset + 1] << 8;
 }
 
 // add u16 and u64 read because the BUN file stores multi-byte integers in little-endian format.
 
-static u32 read_u32_le(const u8 *buf, size_t offset) {
+u32 read_u32_le(const u8 *buf, size_t offset) {
   return (u32)buf[offset]
      | (u32)buf[offset + 1] << 8
      | (u32)buf[offset + 2] << 16
      | (u32)buf[offset + 3] << 24;
 }
 
-static u64 read_u64_le(const u8 *buf, size_t offset) {
+u64 read_u64_le(const u8 *buf, size_t offset) {
   return (u64)buf[offset]
      | (u64)buf[offset + 1] << 8
      | (u64)buf[offset + 2] << 16
@@ -244,7 +244,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
           return BUN_UNSUPPORTED;
       }
   }
-  
+
   return BUN_OK;
 }
 
