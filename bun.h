@@ -78,7 +78,7 @@ typedef struct {
 #define BUN_MAX_VIOLATION_LEN 256
 
 typedef struct {
-    char description[BUN_MAX_VIOLATION_LEN];
+    char message[BUN_MAX_VIOLATION_LEN];
 } BunViolation;
 
 typedef struct {
@@ -93,6 +93,10 @@ typedef struct {
 //
 // Public API
 //
+u16 read_u16_le(const u8 *buf, size_t offset);
+u32 read_u32_le(const u8 *buf, size_t offset);
+u64 read_u64_le(const u8 *buf, size_t offset);
+
 void bun_add_violation(BunParseContext *ctx, const char *message);
 //this function safely stores one validation error message in ctx, so later main.c can print all violations instead of the parser immediately printing to stderr.
 
