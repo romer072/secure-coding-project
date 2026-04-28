@@ -72,6 +72,19 @@ static void print_text_preview(const u8 *data, size_t size) {
 }
 
 /**
+ * Convert a bun_result_t to a human-readable string.
+ */
+static const char *result_to_string(bun_result_t result) {
+    switch (result) {
+        case BUN_OK:          return "bun_ok";
+        case BUN_MALFORMED:   return "bun_malformed";
+        case BUN_UNSUPPORTED: return "bun_unsupported";
+        case BUN_ERR_IO:      return "bun_err_io";
+        default:              return "unknown";
+    }
+}
+
+/**
  * Main entry point for the BUN file parser.
  * 
  * @param argc   Number of command-line arguments
@@ -100,7 +113,20 @@ int main(int argc, char *argv[]) {
   // Parse and validate the BUN header
   result = bun_parse_header(&ctx, &header);
   if (result != BUN_OK) {
-    fprintf(stderr, "Error: header invalid or unsupported (code %d)\n", result);
+    if (result == BUN_MALFORMED) {
+      fprintf(stderr, "Error: header invalid (code %d=malformed)\n", result);
+    } else if (result == BUN_UNSUPPORTED) {
+      fprintf(stderr, "Error: header uses unsupported features (code %d=unsupported)\n", result);
+    } else {
+      fprintf(stderr, "Error: header invalid or unsupported (code %d)\n", result);
+    }
+    // Print violations
+    if (ctx.violation_count > 0) {
+      fprintf(stderr, "\nValidation errors:\n");
+      for (size_t i = 0; i < ctx.violation_count; i++) {
+        fprintf(stderr, "  - %s\n", ctx.violations[i].message);
+      }
+    }
     bun_close(&ctx);
     return result;
   }
@@ -233,5 +259,17 @@ int main(int argc, char *argv[]) {
 
   // Close the BUN file and return the result code
   bun_close(&ctx);
+
+  // Print validation result
+  printf("\nResult: %s\n", result_to_string(result));
+
+  // Print violations if any
+  if (ctx.violation_count > 0) {
+    printf("\nValidation errors:\n");
+    for (size_t i = 0; i < ctx.violation_count; i++) {
+      printf("  - %s\n", ctx.violations[i].message);
+    }
+  }
+
   return result;
 }
