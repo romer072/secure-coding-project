@@ -235,6 +235,9 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   for (u32 i = 0; i < header->asset_count; i++) {
       u8 buf[BUN_ASSET_RECORD_SIZE]; // Buffer for asset record
       BunAssetRecord curr;
+      if(fseek(ctx->file, (long)(header->asset_table_offset+(u64)i*BUN_ASSET_RECORD_SIZE),SEEK_SET)!=0){
+        return BUN_ERR_IO;
+      }
 
       // Read asset record from file
       if (fread(buf, 1, BUN_ASSET_RECORD_SIZE, ctx->file) != BUN_ASSET_RECORD_SIZE) {
