@@ -37,12 +37,8 @@ static const char *fixture(const char *filename) {
     return path;
 }
 
-/* =========================================================
-   TCASE 1: header-tests
-   Tests that the header parser correctly reads and validates
-   the BUN file header fields.
-   ========================================================= */
-
+   //TCASE 1: header-tests  Tests that the header parser correctly reads and validates the BUN file header fields.
+ 
 // Example test suite: header parsing
 
 START_TEST(test_valid_minimal) {
@@ -195,8 +191,7 @@ END_TEST
 
 
 
-    // TCASE 2: asset-tests
-    //Tests that bun_parse_assets() correctly reads and validates asset records, names, and data references.
+    // TCASE 2: asset-tests, Tests that bun_parse_assets() correctly reads and validates asset records, names, and data references.
 
 START_TEST(test_valid_one_asset) {
     BunParseContext ctx = {0};
@@ -354,8 +349,7 @@ END_TEST
 
 
 
-   //TCASE 3: compression-tests
-   //Tests related to compression fields in asset records.
+   //TCASE 3: compression-tests, Tests related to compression fields in asset records.
  
 START_TEST(test_valid_rle) {
     BunParseContext ctx = {0};
