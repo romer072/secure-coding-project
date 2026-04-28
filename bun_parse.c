@@ -254,6 +254,21 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       curr.type              = read_u32_le(buf, 36);
       curr.checksum          = read_u32_le(buf, 40);
       curr.flags             = read_u32_le(buf, 44);
+      if(curr.name_length==0){
+        return BUN_MALFORMED;
+      }
+      if (fseek(ctx->file, (long)(header->string_table_offset+curr.name_offset),SEEK_SET)!=0){
+        return BUN_ERR_IO;
+      }
+      for (u32 i=0; i<curr.name_length; i++) {
+        int ch = fgetc(ctx->file);
+        if (ch==EOF) {
+          return BUN_ERR_IO;
+        }
+        if(ch<32 || ch>126){
+          return BUN_MALFORMED;
+        }
+      }
 
       // Validate name offset and length are within string table
       if (!range_within_file((u64)curr.name_offset, (u64)curr.name_length, header->string_table_size)) {
