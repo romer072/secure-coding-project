@@ -123,6 +123,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 
   // Check if file is large enough to contain header
   if (ctx->file_size < (long)BUN_HEADER_SIZE) {
+    bun_add_violation(ctx, "File too short: less than header size (60 bytes)");
     return BUN_MALFORMED;
   }
 
@@ -145,13 +146,15 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 
   // Validate magic number (must match BUN_MAGIC)
   if (header->magic != BUN_MAGIC) {
+    bun_add_violation(ctx, "Invalid magic number: expected 0x304E5542");
     return BUN_MALFORMED;
   }
 
   // Check if version is supported (must be 1.0)
   if (header->version_major != BUN_VERSION_MAJOR ||
     header->version_minor != BUN_VERSION_MINOR) {
-  return BUN_UNSUPPORTED;
+    bun_add_violation(ctx, "Unsupported version: only 1.0 is supported");
+    return BUN_UNSUPPORTED;
   }
 
     // Verify all offsets and sizes are 4-byte aligned
@@ -160,6 +163,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
      header->data_section_size % 4 != 0 ||
      header->string_table_offset % 4 != 0 ||
      header->string_table_size % 4 != 0) {
+   bun_add_violation(ctx, "Offsets/sizes must be divisible by 4");
    return BUN_MALFORMED;
  }
   
@@ -170,6 +174,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   if (!checked_mul_u64((u64)header->asset_count,
                         (u64)BUN_ASSET_RECORD_SIZE,
                         &asset_table_size)) {
+    bun_add_violation(ctx, "Asset table size overflow");
     return BUN_MALFORMED;
   }
 
@@ -177,6 +182,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   if (!range_within_file(header->asset_table_offset, asset_table_size, file_size) ||
       !range_within_file(header->string_table_offset, header->string_table_size, file_size) ||
       !range_within_file(header->data_section_offset, header->data_section_size, file_size)) {
+    bun_add_violation(ctx, "Table offset/size extends beyond file end");
     return BUN_MALFORMED;
   }
 
@@ -187,6 +193,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
                       header->data_section_offset, header->data_section_size) ||
       ranges_overlap(header->string_table_offset, header->string_table_size,
                       header->data_section_offset, header->data_section_size)) {
+    bun_add_violation(ctx, "Sections overlap in file");
     return BUN_MALFORMED;
   }
 
@@ -247,21 +254,25 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
       // Validate name offset and length are within string table
       if (!range_within_file((u64)curr.name_offset, (u64)curr.name_length, header->string_table_size)) {
+          bun_add_violation(ctx, "Asset name offset/length outside string table");
           return BUN_MALFORMED;
       }
 
       // Validate data offset and size are within data section
       if (!range_within_file(curr.data_offset, curr.data_size, header->data_section_size)) {
+          bun_add_violation(ctx, "Asset data offset/size outside data section");
           return BUN_MALFORMED;
       }
 
       // Reject files with compression (not supported)
       if (curr.compression != 0) {
+          bun_add_violation(ctx, "Compression type not supported: only 0 (none) is allowed");
           return BUN_UNSUPPORTED;
       }
 
       // Reject files with checksums (not supported)
       if (curr.checksum != 0) {
+          bun_add_violation(ctx, "Checksum not supported: only 0 (none) is allowed");
           return BUN_UNSUPPORTED;
       }
   }
