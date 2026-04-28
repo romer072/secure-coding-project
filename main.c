@@ -72,6 +72,19 @@ static void print_text_preview(const u8 *data, size_t size) {
 }
 
 /**
+ * Convert a bun_result_t to a human-readable string.
+ */
+static const char *result_to_string(bun_result_t result) {
+    switch (result) {
+        case BUN_OK:          return "bun_ok";
+        case BUN_MALFORMED:   return "bun_malformed";
+        case BUN_UNSUPPORTED: return "bun_unsupported";
+        case BUN_ERR_IO:      return "bun_err_io";
+        default:              return "unknown";
+    }
+}
+
+/**
  * Main entry point for the BUN file parser.
  * 
  * @param argc   Number of command-line arguments
@@ -233,5 +246,9 @@ int main(int argc, char *argv[]) {
 
   // Close the BUN file and return the result code
   bun_close(&ctx);
+
+  // Print validation result
+  printf("Result: %s\n", result_to_string(result));
+
   return result;
 }
