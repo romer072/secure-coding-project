@@ -5,14 +5,14 @@
 
 #include "bun.h"
 
-/**
- * Check if data contains only printable ASCII characters (bytes 32-126).
- * Used to determine whether to display data as text or hex dump.
- * 
- * @param data   Pointer to data buffer
- * @param size   Number of bytes to check
- * @return       1 if all bytes are printable ASCII, 0 otherwise
- */
+
+// Check if data contains only printable ASCII characters (bytes 32-126).
+ // Used to determine whether to display data as text or hex dump.
+
+// @param data   Pointer to data buffer
+// @param size   Number of bytes to check
+// @return       1 if all bytes are printable ASCII, 0 otherwise
+
 static int is_printable_ascii(const u8 *data, size_t size) {
     for (size_t i = 0; i < size; i++) {
         if (data[i] < 32 || data[i] > 126) {
@@ -22,13 +22,13 @@ static int is_printable_ascii(const u8 *data, size_t size) {
     return 1;
 }
 
-/**
- * Print a hex dump of binary data (max 60 bytes).
- * Used for non-printable data such as images or compressed content.
- * 
- * @param data   Pointer to data buffer
- * @param size   Number of bytes to print
- */
+
+// Print a hex dump of binary data (max 60 bytes).
+// Used for non-printable data such as images or compressed content.
+
+// @param data   Pointer to data buffer
+// @param size   Number of bytes to print
+
 static void print_hex_dump(const u8 *data, size_t size) {
     size_t len = size < 60 ? size : 60;
     printf("  Data (hex): ");
@@ -41,13 +41,13 @@ static void print_hex_dump(const u8 *data, size_t size) {
     printf("\n");
 }
 
-/**
- * Print a text preview of data (max 60 bytes).
- * Escapes special characters (", \, \n, \r, \t) for safe display.
- * 
- * @param data   Pointer to data buffer
- * @param size   Number of bytes to print
- */
+
+// Print a text preview of data (max 60 bytes).
+// Escapes special characters (", \, \n, \r, \t) for safe display.
+
+// @param data   Pointer to data buffer
+// @param size   Number of bytes to print
+
 static void print_text_preview(const u8 *data, size_t size) {
     size_t len = size < 60 ? size : 60;
     printf("  Data: \"");
@@ -71,9 +71,9 @@ static void print_text_preview(const u8 *data, size_t size) {
     printf("\"\n");
 }
 
-/**
- * Convert a bun_result_t to a human-readable string.
- */
+
+// Convert a bun_result_t to a human-readable string.
+
 static const char *result_to_string(bun_result_t result) {
     switch (result) {
         case BUN_OK:          return "bun_ok";

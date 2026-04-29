@@ -31,11 +31,11 @@ u64 read_u64_le(const u8 *buf, size_t offset) {
      | (u64)buf[offset + 7] << 56;
 }
 
-/**
- * Safely stores one validation error message in the parse context.
- * Allows main.c to collect and print all violations rather than
- * immediately printing to stderr.
- */
+
+// Safely stores one validation error message in the parse context.
+// Allows main.c to collect and print all violations rather than
+// immediately printing to stderr.
+
 void bun_add_violation(BunParseContext *ctx, const char *message) {
   if (ctx->violation_count >= BUN_MAX_VIOLATIONS) {
     return;
@@ -112,12 +112,11 @@ bun_result_t bun_open(const char *path, BunParseContext *ctx) {
   return BUN_OK;
 }
 
-/**
- * Parses and validates the BUN file header.
- * Reads header fields from file, validates magic number, version,
- * alignment requirements, and checks that all table/data ranges
- * are within file bounds and don't overlap.
- */
+// Parses and validates the BUN file header.
+// Reads header fields from file, validates magic number, version,
+// alignment requirements, and checks that all table/data ranges
+// are within file bounds and don't overlap.
+
 bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   u8 buf[BUN_HEADER_SIZE]; // Buffer to hold header data
 
@@ -200,11 +199,10 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   return BUN_OK;
 }
 
-/**
- * Parses and validates all asset records in the BUN file.
- * Iterates through each asset, validates that name and data offsets
- * are within their respective sections, and checks for unsupported
- */
+// Parses and validates all asset records in the BUN file.
+// Iterates through each asset, validates that name and data offsets
+// are within their respective sections, and checks for unsupported
+
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   if (ctx == NULL || header == NULL || ctx->file == NULL) {
       bun_add_violation(ctx, "Invalid parse context or header pointer");
@@ -316,11 +314,11 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   return BUN_OK;
 }
 
-/**
- * Closes the BUN file and cleans up resources.
- * @param ctx Parse context with open file handle
- * @return BUN_OK on successful close, BUN_ERR_IO on close failure
- */
+
+// Closes the BUN file and cleans up resources.
+// @param ctx Parse context with open file handle
+// @return BUN_OK on successful close, BUN_ERR_IO on close failure
+
 bun_result_t bun_close(BunParseContext *ctx) {
   assert(ctx->file); // Ensure file handle is valid
 
