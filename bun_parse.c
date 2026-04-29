@@ -256,6 +256,13 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         bun_add_violation(ctx, "Asset name length is zero");
         return BUN_MALFORMED;
       }
+      u64 offsetName = 0;
+      if(!checked_add_u64(header->string_table_offset,(u64)curr.name_offset,&offsetName)){
+        return BUN_MALFORMED;
+      }
+      if(!range_within_file(offsetName,(u64)curr.name_length, file_size)){
+        return BUN_MALFORMED;
+      }
       if (fseek(ctx->file, (long)(header->string_table_offset+curr.name_offset),SEEK_SET)!=0){
         bun_add_violation(ctx, "Failed to seek to asset name in string table");
         return BUN_ERR_IO;
@@ -308,6 +315,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
   return BUN_OK;
 }
+
 /**
  * Closes the BUN file and cleans up resources.
  * @param ctx Parse context with open file handle
