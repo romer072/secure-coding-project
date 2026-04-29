@@ -205,7 +205,6 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   if (ctx == NULL || header == NULL || ctx->file == NULL) {
-      bun_add_violation(ctx, "Invalid parse context or header pointer");
       return BUN_MALFORMED;
   }
 
@@ -215,29 +214,31 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   if (!checked_mul_u64((u64)header->asset_count,
                        (u64)BUN_ASSET_RECORD_SIZE,
                        &asset_table_size)) {
-      bun_add_violation(ctx, "Asset table size overflow");
       return BUN_MALFORMED;
   }
 
   if (!range_within_file(header->asset_table_offset, asset_table_size, file_size)) {
-      bun_add_violation(ctx, "Asset table extends beyond file end");
       return BUN_MALFORMED;
   }
-
-  if (fseek(ctx->file, (long)header->asset_table_offset, SEEK_SET) != 0) {
-      return BUN_ERR_IO;
-  }
-
   for (u32 i = 0; i < header->asset_count; i++) {
       u8 buf[BUN_ASSET_RECORD_SIZE];
       BunAssetRecord curr;
-      if(fseek(ctx->file, (long)(header->asset_table_offset+(u64)i*BUN_ASSET_RECORD_SIZE),SEEK_SET)!=0){
-        bun_add_violation(ctx, "Failed to seek to asset record");
+      u64 recordOff =0;
+      u64 recordPos =0;
+      if(!checked_mul_u64((u64)i,(u64)BUN_ASSET_RECORD_SIZE,&recordOff)){
+        return BUN_MALFORMED;
+      }
+      if(!checked_add_u64(header->asset_table_offset,recordOff,&recordPos)){
+        return BUN_MALFORMED;
+      }
+      if(!range_within_file(recordPos,(u64)BUN_ASSET_RECORD_SIZE,file_size)){
+        return BUN_MALFORMED;
+      }
+      if(fseek(ctx->file,(long)recordPos,SEEK_SET)!=0){
         return BUN_ERR_IO;
       }
 
       if (fread(buf, 1, BUN_ASSET_RECORD_SIZE, ctx->file) != BUN_ASSET_RECORD_SIZE) {
-          bun_add_violation(ctx, "Failed to read asset record");
           return BUN_ERR_IO;
       }
 
@@ -251,62 +252,85 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       curr.checksum          = read_u32_le(buf, 40);
       curr.flags             = read_u32_le(buf, 44);
       if(curr.name_length==0){
-        bun_add_violation(ctx, "Asset name length is zero");
+        return BUN_MALFORMED;
+      }
+      if(!range_within_file((u64)curr.name_offset,(u64)curr.name_length,header->string_table_size)){
         return BUN_MALFORMED;
       }
       u64 offsetName = 0;
       if(!checked_add_u64(header->string_table_offset,(u64)curr.name_offset,&offsetName)){
         return BUN_MALFORMED;
       }
-      if(!range_within_file(offsetName,(u64)curr.name_length, file_size)){
+      if(!range_within_file(offsetName,(u64)curr.name_length,file_size)){
         return BUN_MALFORMED;
       }
-      if (fseek(ctx->file, (long)(header->string_table_offset+curr.name_offset),SEEK_SET)!=0){
-        bun_add_violation(ctx, "Failed to seek to asset name in string table");
+      if(fseek(ctx->file,(long)offsetName,SEEK_SET)!=0){
         return BUN_ERR_IO;
       }
       for (u32 j=0; j<curr.name_length; j++) {
         int ch = fgetc(ctx->file);
         if (ch==EOF) {
-          bun_add_violation(ctx, "Unexpected end of file while reading asset name");
           return BUN_ERR_IO;
         }
         if(ch<32 || ch>126){
-          bun_add_violation(ctx, "Asset name contains non-printable characters");
           return BUN_MALFORMED;
         }
-      }
-
-      if (!range_within_file((u64)curr.name_offset, (u64)curr.name_length, header->string_table_size)) {
-          bun_add_violation(ctx, "Asset name offset/length extends beyond string table");
-          return BUN_MALFORMED;
       }
 
       if (!range_within_file(curr.data_offset, curr.data_size, header->data_section_size)) {
-          bun_add_violation(ctx, "Asset data offset/size extends beyond data section");
           return BUN_MALFORMED;
       }
-      if (curr.compression == 0){
-        if(curr.uncompressed_size!=0){
-          bun_add_violation(ctx, "Uncompressed asset has non-zero uncompressed size");
+      if(curr.compression==0){
+      }else if(curr.compression==1){
+         if((curr.data_size%2)!=0){
           return BUN_MALFORMED;
         }
-      } else if(curr.compression==1){
-        // zlib compression - valid
-      } else if(curr.compression==2){
-        bun_add_violation(ctx, "LZ4 compression is not supported");
+        u64 validOffData = 0;
+        if(!checked_add_u64(header->data_section_offset,curr.data_offset,&validOffData)){
+          return BUN_MALFORMED;
+        }
+        if(!range_within_file(validOffData,curr.data_size,file_size)){
+          return BUN_MALFORMED;
+        }
+        if(fseek(ctx->file,(long)validOffData,SEEK_SET)!=0){
+          return BUN_ERR_IO;
+        }
+        u64 bytesCurr = curr.data_size;
+        u64 bytesOut = 0;
+        while(bytesCurr>0){
+          int count = fgetc(ctx->file);
+          int value = fgetc(ctx->file);
+          (void)value;
+          if(count==EOF||value==EOF){
+            return BUN_MALFORMED;
+          }
+          if(count==0){
+            return BUN_MALFORMED;
+          }
+          u64 newBytes =0;
+          if(!checked_add_u64(bytesOut,(u64)(u8)count,&newBytes)){
+            return BUN_MALFORMED;
+          }
+          bytesOut = newBytes;
+          if(bytesOut>curr.uncompressed_size){
+            return BUN_MALFORMED;
+          }
+          bytesCurr-=2;
+        }
+        if(bytesOut!=curr.uncompressed_size){
+          return BUN_MALFORMED;
+        }
+      }else if(curr.compression ==2){
         return BUN_UNSUPPORTED;
-      } else{
-        bun_add_violation(ctx, "Unknown compression type");
+      }else{
         return BUN_UNSUPPORTED;
       }
-      if((curr.flags & (BUN_FLAG_ENCRYPTED |BUN_FLAG_EXECUTABLE ))!=curr.flags){
-        bun_add_violation(ctx, "Unsupported asset flags");
+      if((curr.flags&(BUN_FLAG_ENCRYPTED|BUN_FLAG_EXECUTABLE))!=curr.flags){
         return BUN_UNSUPPORTED;
       }
 
+      
       if (curr.checksum != 0) {
-        bun_add_violation(ctx, "Non-zero checksum is not supported");
         return BUN_UNSUPPORTED;
       }
     }
