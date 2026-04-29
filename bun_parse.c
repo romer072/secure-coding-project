@@ -220,11 +220,6 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   if (!range_within_file(header->asset_table_offset, asset_table_size, file_size)) {
       return BUN_MALFORMED;
   }
-
-  if (fseek(ctx->file, (long)header->asset_table_offset, SEEK_SET) != 0) {
-      return BUN_ERR_IO;
-  }
-
   for (u32 i = 0; i < header->asset_count; i++) {
       u8 buf[BUN_ASSET_RECORD_SIZE];
       BunAssetRecord curr;
@@ -259,17 +254,20 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       if(curr.name_length==0){
         return BUN_MALFORMED;
       }
+      if(!range_within_file((u64)curr.name_offset,(u64)curr.name_length,header->string_table_size)){
+        return BUN_MALFORMED;
+      }
       u64 offsetName = 0;
       if(!checked_add_u64(header->string_table_offset,(u64)curr.name_offset,&offsetName)){
         return BUN_MALFORMED;
       }
-      if(!range_within_file(offsetName,(u64)curr.name_length, file_size)){
+      if(!range_within_file(offsetName,(u64)curr.name_length,file_size)){
         return BUN_MALFORMED;
       }
-      if (fseek(ctx->file, (long)(header->string_table_offset+curr.name_offset),SEEK_SET)!=0){
+      if(fseek(ctx->file,(long)offsetName,SEEK_SET)!=0){
         return BUN_ERR_IO;
       }
-      for (u32 i=0; i<curr.name_length; i++) {
+      for (u32 j=0; j<curr.name_length; j++) {
         int ch = fgetc(ctx->file);
         if (ch==EOF) {
           return BUN_ERR_IO;
@@ -283,9 +281,6 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
           return BUN_MALFORMED;
       }
       if(curr.compression==0){
-        if(curr.uncompressed_size != 0){
-          return BUN_MALFORMED;
-        }
       }else if(curr.compression==1){
          if((curr.data_size%2)!=0){
           return BUN_MALFORMED;
@@ -342,6 +337,8 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
   return BUN_OK;
 }
+
+
 
 
 // Closes the BUN file and cleans up resources.
