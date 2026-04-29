@@ -283,11 +283,59 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       }
 
       // Reject files with compression (not supported)
-      if (curr.compression != 0) {
-          bun_add_violation(ctx, "Compression type not supported: only 0 (none) is allowed");
-          return BUN_UNSUPPORTED;
+     if (curr.compression == 0) {
+        //spec 5, uncompressed data = 0 
+        if(curr.uncompressed_size != 0){
+          return BUN_MALFORMED;
+        }
+      } else if (curr.compression == 1){
+        if(curr.data_size % 2 != 0){
+          return BUN_MALFORMED;
+        }
+        if(fseek(ctx->file,(long)(header->data_section_offset+curr.data_offset),SEEK_SET)!=0){
+          return BUN_ERR_IO;
+        }
       }
+      //RLE PARSING
+      u64 bytesCurr = curr.data_size;
+      u64 bytesOut = 0;
 
+      while (bytesCurr>0){
+        if(bytesCurr<2){
+          return BUN_MALFORMED;
+        }
+        int count = fgetc(ctx->file);
+        if(count == EOF){
+          return BUN_ERR_IO;
+        }
+        int value = fgetc(ctx->file);
+        if(value == EOF){
+          return BUN_ERR_IO;
+        }
+        bytesCurr -=2;
+        //spec 8, count must not be zero
+        if(count == 0){
+          return BUN_MALFORMED;
+        }
+        u64 countNew = 0;
+        if (!checked_mul_u64((u64)count, (u64)2, &countNew)) {
+          return BUN_MALFORMED;
+        }
+        countOut = countNew;
+        //condition: Does not exceed uncompressed size
+        if(countOut>curr.uncompressed_size){
+          return BUN_MALFORMED;
+        }
+        //spec 5,uncompressed == compressed size
+        if(countOut!=curr.uncompressed_size){
+          return BUN_MALFORMED;
+        }
+      }else if(curr.compression==2){
+        return BUN_UNSUPPORTED;
+      }else{
+        //unkown compression code
+        return BUN_UNSUPPORTED;
+      }
       // Reject files with checksums (not supported)
       if (curr.checksum != 0) {
           bun_add_violation(ctx, "Checksum not supported: only 0 (none) is allowed");
