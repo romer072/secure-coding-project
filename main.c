@@ -84,13 +84,13 @@ static const char *result_to_string(bun_result_t result) {
     }
 }
 
-
-// Main entry point for the BUN file parser.
-
-// @param argc   Number of command-line arguments
-// @param argv   Array of command-line argument strings
-// @return       Exit code (0=success, 1=malformed, 2=unsupported, 3+=error)
-
+/**
+ * Main entry point for the BUN file parser.
+ * 
+ * @param argc   Number of command-line arguments
+ * @param argv   Array of command-line argument strings
+ * @return       Exit code (0=success, 1=malformed, 2=unsupported, 3=error)
+ */
 int main(int argc, char *argv[]) {
   // Validate command-line arguments
   if (argc != 2) {
@@ -110,31 +110,28 @@ int main(int argc, char *argv[]) {
     return result;
   }
 
-  // Parse and validate the BUN header
-  result = bun_parse_header(&ctx, &header);
-  if (result != BUN_OK) {
-    if (result == BUN_MALFORMED) {
-      fprintf(stderr, "Error: header invalid (code %d=malformed)\n", result);
-    } else if (result == BUN_UNSUPPORTED) {
-      fprintf(stderr, "Error: header uses unsupported features (code %d=unsupported)\n", result);
-    } else {
-      fprintf(stderr, "Error: header invalid or unsupported (code %d)\n", result);
+    // Parse and validate the BUN header
+    result = bun_parse_header(&ctx, &header);
+    if (result != BUN_OK) {
+        // Print error type and code
+        if (result == BUN_MALFORMED) {
+            printf(" BUN Malformed (error code: %d)\n", result);
+        } else if (result == BUN_UNSUPPORTED) {
+            printf(" BUN Unsupported (error code: %d)\n", result);
+        } else {
+            printf(" BUN Error (error code: %d)\n", result);
+        }
+        // Print all violations, one per line, prefixed with '- '
+        for (size_t i = 0; i < ctx.violation_count; i++) {
+            printf("- %s\n", ctx.violations[i].message);
+        }
+        bun_close(&ctx);
+        return result;
     }
-    // Print violations
-    if (ctx.violation_count > 0) {
-      fprintf(stderr, "\nValidation errors:\n");
-      for (size_t i = 0; i < ctx.violation_count; i++) {
-        fprintf(stderr, "  - %s\n", ctx.violations[i].message);
-      }
-    }
-    bun_close(&ctx);
-    return result;
-  }
 
   // Parse asset records
   result = bun_parse_assets(&ctx, &header);
 
-  // Handle parsing results
   if (result == BUN_OK) {
     // === Print all header fields ===
     printf("=== BUN File Header ===\n");
@@ -249,27 +246,22 @@ int main(int argc, char *argv[]) {
     free(data_section);
     free(string_table);
 
-  } else if (result == BUN_MALFORMED) {
-    fprintf(stderr, "Error: file is malformed\n");
-  } else if (result == BUN_UNSUPPORTED) {
-    fprintf(stderr, "Error: file uses unsupported features\n");
-  } else if (result == BUN_ERR_IO) {
-    fprintf(stderr, "Error: I/O error while parsing\n");
-  }
-
-  // Close the BUN file and return the result code
-  bun_close(&ctx);
-
-  // Print validation result
-  printf("\nResult: %s\n", result_to_string(result));
-
-  // Print violations if any
-  if (ctx.violation_count > 0) {
-    printf("\nValidation errors:\n");
-    for (size_t i = 0; i < ctx.violation_count; i++) {
-      printf("  - %s\n", ctx.violations[i].message);
+    printf("\nResult: %s\n", result_to_string(result));
+    return result;
+    } else {
+        // Print error type and code for invalid files
+        if (result == BUN_MALFORMED) {
+            printf(" BUN Malformed (error code: %d)\n", result);
+        } else if (result == BUN_UNSUPPORTED) {
+            printf(" BUN Unsupported (error code: %d)\n", result);
+        } else {
+            printf(" BUN Error (error code: %d)\n", result);
+        }
+        // Print all violations, one per line, prefixed with '- '
+        for (size_t i = 0; i < ctx.violation_count; i++) {
+            printf("- %s\n", ctx.violations[i].message);
+        }
+        bun_close(&ctx);
+        return result;
     }
-  }
-
-  return result;
 }
