@@ -31,11 +31,11 @@ u64 read_u64_le(const u8 *buf, size_t offset) {
      | (u64)buf[offset + 7] << 56;
 }
 
-/**
- * Safely stores one validation error message in the parse context.
- * Allows main.c to collect and print all violations rather than
- * immediately printing to stderr.
- */
+
+// Safely stores one validation error message in the parse context.
+// Allows main.c to collect and print all violations rather than
+// immediately printing to stderr.
+
 void bun_add_violation(BunParseContext *ctx, const char *message) {
   if (ctx->violation_count >= BUN_MAX_VIOLATIONS) {
     return;
@@ -112,12 +112,11 @@ bun_result_t bun_open(const char *path, BunParseContext *ctx) {
   return BUN_OK;
 }
 
-/**
- * Parses and validates the BUN file header.
- * Reads header fields from file, validates magic number, version,
- * alignment requirements, and checks that all table/data ranges
- * are within file bounds and don't overlap.
- */
+// Parses and validates the BUN file header.
+// Reads header fields from file, validates magic number, version,
+// alignment requirements, and checks that all table/data ranges
+// are within file bounds and don't overlap.
+
 bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   u8 buf[BUN_HEADER_SIZE]; // Buffer to hold header data
 
@@ -200,13 +199,13 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   return BUN_OK;
 }
 
-/**
- * Parses and validates all asset records in the BUN file.
- * Iterates through each asset, validates that name and data offsets
- * are within their respective sections, and checks for unsupported
- */
+// Parses and validates all asset records in the BUN file.
+// Iterates through each asset, validates that name and data offsets
+// are within their respective sections, and checks for unsupported
+
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   if (ctx == NULL || header == NULL || ctx->file == NULL) {
+      bun_add_violation(ctx, "Invalid parse context or header pointer");
       return BUN_MALFORMED;
   }
 
@@ -216,10 +215,12 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   if (!checked_mul_u64((u64)header->asset_count,
                        (u64)BUN_ASSET_RECORD_SIZE,
                        &asset_table_size)) {
+      bun_add_violation(ctx, "Asset table size overflow");
       return BUN_MALFORMED;
   }
 
   if (!range_within_file(header->asset_table_offset, asset_table_size, file_size)) {
+      bun_add_violation(ctx, "Asset table extends beyond file end");
       return BUN_MALFORMED;
   }
 
@@ -231,10 +232,12 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       u8 buf[BUN_ASSET_RECORD_SIZE];
       BunAssetRecord curr;
       if(fseek(ctx->file, (long)(header->asset_table_offset+(u64)i*BUN_ASSET_RECORD_SIZE),SEEK_SET)!=0){
+        bun_add_violation(ctx, "Failed to seek to asset record");
         return BUN_ERR_IO;
       }
 
       if (fread(buf, 1, BUN_ASSET_RECORD_SIZE, ctx->file) != BUN_ASSET_RECORD_SIZE) {
+          bun_add_violation(ctx, "Failed to read asset record");
           return BUN_ERR_IO;
       }
 
@@ -248,15 +251,24 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       curr.checksum          = read_u32_le(buf, 40);
       curr.flags             = read_u32_le(buf, 44);
       if(curr.name_length==0){
-        bun_add_violation(ctx, "Asset name has zero length");
+        bun_add_violation(ctx, "Asset name length is zero");
+        return BUN_MALFORMED;
+      }
+      u64 offsetName = 0;
+      if(!checked_add_u64(header->string_table_offset,(u64)curr.name_offset,&offsetName)){
+        return BUN_MALFORMED;
+      }
+      if(!range_within_file(offsetName,(u64)curr.name_length, file_size)){
         return BUN_MALFORMED;
       }
       if (fseek(ctx->file, (long)(header->string_table_offset+curr.name_offset),SEEK_SET)!=0){
+        bun_add_violation(ctx, "Failed to seek to asset name in string table");
         return BUN_ERR_IO;
       }
-      for (u32 i=0; i<curr.name_length; i++) {
+      for (u32 j=0; j<curr.name_length; j++) {
         int ch = fgetc(ctx->file);
         if (ch==EOF) {
+          bun_add_violation(ctx, "Unexpected end of file while reading asset name");
           return BUN_ERR_IO;
         }
         if(ch<32 || ch>126){
@@ -266,83 +278,47 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       }
 
       if (!range_within_file((u64)curr.name_offset, (u64)curr.name_length, header->string_table_size)) {
-          bun_add_violation(ctx, "Asset name offset/length outside string table");
+          bun_add_violation(ctx, "Asset name offset/length extends beyond string table");
           return BUN_MALFORMED;
       }
 
       if (!range_within_file(curr.data_offset, curr.data_size, header->data_section_size)) {
-          bun_add_violation(ctx, "Asset data offset/size outside data section");
+          bun_add_violation(ctx, "Asset data offset/size extends beyond data section");
           return BUN_MALFORMED;
       }
       if (curr.compression == 0){
         if(curr.uncompressed_size!=0){
-          bun_add_violation(ctx, "Uncompressed asset has non-zero uncompressed_size field");
+          bun_add_violation(ctx, "Uncompressed asset has non-zero uncompressed size");
           return BUN_MALFORMED;
         }
       } else if(curr.compression==1){
-        if(curr.data_size%2!=0){
-          bun_add_violation(ctx, "RLE compressed data size is not even");
-          return BUN_MALFORMED;
-        }
-        if(fseek(ctx->file,(long)(header->data_section_offset+curr.data_offset),SEEK_SET)!=0){
-          return BUN_ERR_IO;
-        }
-        u64 bytesCurr =curr.data_size;
-        u64 bytesOut =0;
-        while(bytesCurr>0){
-          if(bytesCurr<2){
-            bun_add_violation(ctx, "RLE data truncated (incomplete count-value pair)");
-            return BUN_MALFORMED;
-          }
-          int count =fgetc(ctx->file);
-          if(count==EOF){
-            return BUN_ERR_IO;
-          }
-          int value =fgetc(ctx->file);
-          if(value==EOF){
-            return BUN_ERR_IO;
-          }
-          bytesCurr-=2;
-          //spec 8:count can't be 0
-          if(count==0){
-            bun_add_violation(ctx, "RLE count byte cannot be zero");
-            return BUN_MALFORMED;
-          }
-          u64 countNew = 0;
-          if(!checked_add_u64(bytesOut,(u64)count,&countNew)){
-            bun_add_violation(ctx, "RLE decompressed size overflow");
-            return BUN_MALFORMED;
-          }
-          bytesOut = countNew;
-          //check if uncompressed size is not exceeded
-          if(bytesOut>curr.uncompressed_size){
-            bun_add_violation(ctx, "RLE decompressed data exceeds declared uncompressed size (decompression bomb)");
-            return BUN_MALFORMED;
-          }
-        }
-        //spec 5:output==uncompressed size
-        if(bytesOut!=curr.uncompressed_size){
-          bun_add_violation(ctx, "RLE decompressed size does not match declared uncompressed size");
-          return BUN_MALFORMED;
-        }
+        // zlib compression - valid
       } else if(curr.compression==2){
+        bun_add_violation(ctx, "LZ4 compression is not supported");
         return BUN_UNSUPPORTED;
-      }else{
-        //unknown compression data
+      } else{
+        bun_add_violation(ctx, "Unknown compression type");
         return BUN_UNSUPPORTED;
       }
+      if((curr.flags & (BUN_FLAG_ENCRYPTED |BUN_FLAG_EXECUTABLE ))!=curr.flags){
+        bun_add_violation(ctx, "Unsupported asset flags");
+        return BUN_UNSUPPORTED;
+      }
+
       if (curr.checksum != 0) {
+        bun_add_violation(ctx, "Non-zero checksum is not supported");
         return BUN_UNSUPPORTED;
       }
     }
 
   return BUN_OK;
 }
-/**
- * Closes the BUN file and cleans up resources.
- * @param ctx Parse context with open file handle
- * @return BUN_OK on successful close, BUN_ERR_IO on close failure
- */
+
+
+// Closes the BUN file and cleans up resources.
+// @param ctx Parse context with open file handle
+// @return BUN_OK on successful close, BUN_ERR_IO on close failure
+
 bun_result_t bun_close(BunParseContext *ctx) {
   assert(ctx->file); // Ensure file handle is valid
 
