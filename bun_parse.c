@@ -252,9 +252,11 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       curr.checksum          = read_u32_le(buf, 40);
       curr.flags             = read_u32_le(buf, 44);
       if(curr.name_length==0){
+        bun_add_violation(ctx, "Asset name cannot be empty");
         return BUN_MALFORMED;
       }
       if(!range_within_file((u64)curr.name_offset,(u64)curr.name_length,header->string_table_size)){
+        bun_add_violation(ctx, "Asset name offset/length outside string table");
         return BUN_MALFORMED;
       }
       u64 offsetName = 0;
@@ -273,16 +275,19 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
           return BUN_ERR_IO;
         }
         if(ch<32 || ch>126){
+          bun_add_violation(ctx, "Asset name contains non-printable characters");
           return BUN_MALFORMED;
         }
       }
 
       if (!range_within_file(curr.data_offset, curr.data_size, header->data_section_size)) {
+          bun_add_violation(ctx, "Asset data offset/size outside data section");
           return BUN_MALFORMED;
       }
       if(curr.compression==0){
       }else if(curr.compression==1){
          if((curr.data_size%2)!=0){
+          bun_add_violation(ctx, "RLE compressed data must have even size");
           return BUN_MALFORMED;
         }
         u64 validOffData = 0;
@@ -305,6 +310,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
             return BUN_MALFORMED;
           }
           if(count==0){
+            bun_add_violation(ctx, "RLE count cannot be zero");
             return BUN_MALFORMED;
           }
           u64 newBytes =0;
@@ -313,24 +319,30 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
           }
           bytesOut = newBytes;
           if(bytesOut>curr.uncompressed_size){
+            bun_add_violation(ctx, "RLE decompressed size exceeds uncompressed_size (decompression bomb)");
             return BUN_MALFORMED;
           }
           bytesCurr-=2;
         }
         if(bytesOut!=curr.uncompressed_size){
+          bun_add_violation(ctx, "RLE decompressed size does not match uncompressed_size");
           return BUN_MALFORMED;
         }
       }else if(curr.compression ==2){
+        bun_add_violation(ctx, "Compression type 2 (zlib) is not supported");
         return BUN_UNSUPPORTED;
       }else{
+        bun_add_violation(ctx, "Unknown compression type");
         return BUN_UNSUPPORTED;
       }
       if((curr.flags&(BUN_FLAG_ENCRYPTED|BUN_FLAG_EXECUTABLE))!=curr.flags){
+        bun_add_violation(ctx, "Unsupported asset flags (encrypted or executable)");
         return BUN_UNSUPPORTED;
       }
 
       
       if (curr.checksum != 0) {
+        bun_add_violation(ctx, "Checksum not supported (only 0 is allowed)");
         return BUN_UNSUPPORTED;
       }
     }
