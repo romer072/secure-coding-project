@@ -248,6 +248,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       curr.checksum          = read_u32_le(buf, 40);
       curr.flags             = read_u32_le(buf, 44);
       if(curr.name_length==0){
+        bun_add_violation(ctx, "Asset name has zero length");
         return BUN_MALFORMED;
       }
       if (fseek(ctx->file, (long)(header->string_table_offset+curr.name_offset),SEEK_SET)!=0){
@@ -259,23 +260,28 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
           return BUN_ERR_IO;
         }
         if(ch<32 || ch>126){
+          bun_add_violation(ctx, "Asset name contains non-printable characters");
           return BUN_MALFORMED;
         }
       }
 
       if (!range_within_file((u64)curr.name_offset, (u64)curr.name_length, header->string_table_size)) {
+          bun_add_violation(ctx, "Asset name offset/length outside string table");
           return BUN_MALFORMED;
       }
 
       if (!range_within_file(curr.data_offset, curr.data_size, header->data_section_size)) {
+          bun_add_violation(ctx, "Asset data offset/size outside data section");
           return BUN_MALFORMED;
       }
       if (curr.compression == 0){
         if(curr.uncompressed_size!=0){
+          bun_add_violation(ctx, "Uncompressed asset has non-zero uncompressed_size field");
           return BUN_MALFORMED;
         }
       } else if(curr.compression==1){
         if(curr.data_size%2!=0){
+          bun_add_violation(ctx, "RLE compressed data size is not even");
           return BUN_MALFORMED;
         }
         if(fseek(ctx->file,(long)(header->data_section_offset+curr.data_offset),SEEK_SET)!=0){
@@ -285,6 +291,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         u64 bytesOut =0;
         while(bytesCurr>0){
           if(bytesCurr<2){
+            bun_add_violation(ctx, "RLE data truncated (incomplete count-value pair)");
             return BUN_MALFORMED;
           }
           int count =fgetc(ctx->file);
@@ -298,20 +305,24 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
           bytesCurr-=2;
           //spec 8:count can't be 0
           if(count==0){
+            bun_add_violation(ctx, "RLE count byte cannot be zero");
             return BUN_MALFORMED;
           }
           u64 countNew = 0;
           if(!checked_add_u64(bytesOut,(u64)count,&countNew)){
+            bun_add_violation(ctx, "RLE decompressed size overflow");
             return BUN_MALFORMED;
           }
           bytesOut = countNew;
           //check if uncompressed size is not exceeded
           if(bytesOut>curr.uncompressed_size){
+            bun_add_violation(ctx, "RLE decompressed data exceeds declared uncompressed size (decompression bomb)");
             return BUN_MALFORMED;
           }
         }
         //spec 5:output==uncompressed size
         if(bytesOut!=curr.uncompressed_size){
+          bun_add_violation(ctx, "RLE decompressed size does not match declared uncompressed size");
           return BUN_MALFORMED;
         }
       } else if(curr.compression==2){
