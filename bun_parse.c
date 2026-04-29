@@ -206,7 +206,6 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
  * are within their respective sections, and checks for unsupported
  */
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
-  // Validate input parameters
   if (ctx == NULL || header == NULL || ctx->file == NULL) {
       return BUN_MALFORMED;
   }
@@ -214,37 +213,31 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   u64 file_size = (u64)ctx->file_size;
   u64 asset_table_size = 0;
 
-  // Calculate asset table size with overflow check
   if (!checked_mul_u64((u64)header->asset_count,
                        (u64)BUN_ASSET_RECORD_SIZE,
                        &asset_table_size)) {
       return BUN_MALFORMED;
   }
 
-  // Verify asset table is within file bounds
   if (!range_within_file(header->asset_table_offset, asset_table_size, file_size)) {
       return BUN_MALFORMED;
   }
 
-  // Seek to asset table location in file
   if (fseek(ctx->file, (long)header->asset_table_offset, SEEK_SET) != 0) {
       return BUN_ERR_IO;
   }
 
-  // Iterate through each asset record
   for (u32 i = 0; i < header->asset_count; i++) {
-      u8 buf[BUN_ASSET_RECORD_SIZE]; // Buffer for asset record
+      u8 buf[BUN_ASSET_RECORD_SIZE];
       BunAssetRecord curr;
       if(fseek(ctx->file, (long)(header->asset_table_offset+(u64)i*BUN_ASSET_RECORD_SIZE),SEEK_SET)!=0){
         return BUN_ERR_IO;
       }
 
-      // Read asset record from file
       if (fread(buf, 1, BUN_ASSET_RECORD_SIZE, ctx->file) != BUN_ASSET_RECORD_SIZE) {
           return BUN_ERR_IO;
       }
 
-      // Parse asset fields from buffer
       curr.name_offset       = read_u32_le(buf, 0);
       curr.name_length       = read_u32_le(buf, 4);
       curr.data_offset       = read_u64_le(buf, 8);
@@ -270,82 +263,70 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         }
       }
 
-      // Validate name offset and length are within string table
       if (!range_within_file((u64)curr.name_offset, (u64)curr.name_length, header->string_table_size)) {
-          bun_add_violation(ctx, "Asset name offset/length outside string table");
           return BUN_MALFORMED;
       }
 
-      // Validate data offset and size are within data section
       if (!range_within_file(curr.data_offset, curr.data_size, header->data_section_size)) {
-          bun_add_violation(ctx, "Asset data offset/size outside data section");
           return BUN_MALFORMED;
       }
-
-      // Reject files with compression (not supported)
-     if (curr.compression == 0) {
-        //spec 5, uncompressed data = 0 
-        if(curr.uncompressed_size != 0){
+      if (curr.compression == 0){
+        if(curr.uncompressed_size!=0){
           return BUN_MALFORMED;
         }
-      } else if (curr.compression == 1){
-        if(curr.data_size % 2 != 0){
+      } else if(curr.compression==1){
+        if(curr.data_size%2!=0){
           return BUN_MALFORMED;
         }
         if(fseek(ctx->file,(long)(header->data_section_offset+curr.data_offset),SEEK_SET)!=0){
           return BUN_ERR_IO;
         }
-      }
-      //RLE PARSING
-      u64 bytesCurr = curr.data_size;
-      u64 bytesOut = 0;
-
-      while (bytesCurr>0){
-        if(bytesCurr<2){
+        u64 bytesCurr =curr.data_size;
+        u64 bytesOut =0;
+        while(bytesCurr>0){
+          if(bytesCurr<2){
+            return BUN_MALFORMED;
+          }
+          int count =fgetc(ctx->file);
+          if(count==EOF){
+            return BUN_ERR_IO;
+          }
+          int value =fgetc(ctx->file);
+          if(value==EOF){
+            return BUN_ERR_IO;
+          }
+          bytesCurr-=2;
+          //spec 8:count can't be 0
+          if(count==0){
+            return BUN_MALFORMED;
+          }
+          u64 countNew = 0;
+          if(!checked_add_u64(bytesOut,(u64)count,&countNew)){
+            return BUN_MALFORMED;
+          }
+          bytesOut = countNew;
+          //check if uncompressed size is not exceeded
+          if(bytesOut>curr.uncompressed_size){
+            return BUN_MALFORMED;
+          }
+        }
+        //spec 5:output==uncompressed size
+        if(bytesOut!=curr.uncompressed_size){
           return BUN_MALFORMED;
         }
-        int count = fgetc(ctx->file);
-        if(count == EOF){
-          return BUN_ERR_IO;
-        }
-        int value = fgetc(ctx->file);
-        if(value == EOF){
-          return BUN_ERR_IO;
-        }
-        bytesCurr -=2;
-        //spec 8, count must not be zero
-        if(count == 0){
-          return BUN_MALFORMED;
-        }
-        u64 countNew = 0;
-        if (!checked_mul_u64((u64)count, (u64)2, &countNew)) {
-          return BUN_MALFORMED;
-        }
-        countOut = countNew;
-        //condition: Does not exceed uncompressed size
-        if(countOut>curr.uncompressed_size){
-          return BUN_MALFORMED;
-        }
-        //spec 5,uncompressed == compressed size
-        if(countOut!=curr.uncompressed_size){
-          return BUN_MALFORMED;
-        }
-      }else if(curr.compression==2){
+      } else if(curr.compression==2){
         return BUN_UNSUPPORTED;
       }else{
-        //unkown compression code
+        //unknown compression data
         return BUN_UNSUPPORTED;
       }
-      // Reject files with checksums (not supported)
       if (curr.checksum != 0) {
-          bun_add_violation(ctx, "Checksum not supported: only 0 (none) is allowed");
-          return BUN_UNSUPPORTED;
+        return BUN_UNSUPPORTED;
       }
-  }
+    }
 
   return BUN_OK;
 }
-
 /**
  * Closes the BUN file and cleans up resources.
  * @param ctx Parse context with open file handle
