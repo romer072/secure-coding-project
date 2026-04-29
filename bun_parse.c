@@ -275,25 +275,23 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
           return BUN_MALFORMED;
         }
       } else if(curr.compression==1){
-        if(curr.data_size%2!=0){
+        if((curr.data_size%2)!=0){
           return BUN_MALFORMED;
         }
         if(fseek(ctx->file,(long)(header->data_section_offset+curr.data_offset),SEEK_SET)!=0){
           return BUN_ERR_IO;
         }
+
         u64 bytesCurr =curr.data_size;
-        u64 bytesOut =0;
+        u64 bytesOut = 0;
+        
         while(bytesCurr>0){
-          if(bytesCurr<2){
+          int count = fgetc(ctx->file);
+          int value = fgetc(ctx->file);
+          (void)value;
+
+          if(count==EOF || value==EOF){
             return BUN_MALFORMED;
-          }
-          int count =fgetc(ctx->file);
-          if(count==EOF){
-            return BUN_ERR_IO;
-          }
-          int value =fgetc(ctx->file);
-          if(value==EOF){
-            return BUN_ERR_IO;
           }
           bytesCurr-=2;
           //spec 8:count can't be 0
@@ -320,12 +318,14 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         //unknown compression data
         return BUN_UNSUPPORTED;
       }
+      
       if (curr.checksum != 0) {
         return BUN_UNSUPPORTED;
       }
     }
 
   return BUN_OK;
+}
 }
 /**
  * Closes the BUN file and cleans up resources.
