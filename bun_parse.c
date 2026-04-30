@@ -5,19 +5,20 @@
 #include <stdint.h>
 
 #include "bun.h"
-
+//specification 2: Read bun fields and write in little endian order
+//u16:2 bytes little endian
 u16 read_u16_le(const u8 *buf, size_t offset) {
   return (u16)buf[offset]
        | (u16)buf[offset + 1] << 8;
 }
-
+//u32: 4 bytes little endian
 u32 read_u32_le(const u8 *buf, size_t offset) {
   return (u32)buf[offset]
        | (u32)buf[offset + 1] << 8
        | (u32)buf[offset + 2] << 16
        | (u32)buf[offset + 3] << 24;
 }
-
+//u64:8 bytes little endian
 u64 read_u64_le(const u8 *buf, size_t offset) {
   return (u64)buf[offset]
        | (u64)buf[offset + 1] << 8
@@ -28,7 +29,7 @@ u64 read_u64_le(const u8 *buf, size_t offset) {
        | (u64)buf[offset + 6] << 48
        | (u64)buf[offset + 7] << 56;
 }
-
+//Parser errors and preventing overflows
 void bun_add_violation(BunParseContext *ctx, const char *message) {
   if (ctx == NULL || message == NULL) {
     return;
@@ -45,7 +46,7 @@ void bun_add_violation(BunParseContext *ctx, const char *message) {
   ctx->violations[ctx->violation_count].message[BUN_MAX_VIOLATION_LEN - 1] = '\0';
   ctx->violation_count++;
 }
-
+//prevent offset+size overflow, treat as u64 arithmetic 
 static int checked_add_u64(u64 a, u64 b, u64 *result) {
   if (UINT64_MAX - a < b) {
     return 0;
@@ -54,7 +55,7 @@ static int checked_add_u64(u64 a, u64 b, u64 *result) {
   *result = a + b;
   return 1;
 }
-
+//prevent asset*48 overflow, spec 5
 static int checked_mul_u64(u64 a, u64 b, u64 *result) {
   if (a != 0 && UINT64_MAX / a < b) {
     return 0;
@@ -63,7 +64,7 @@ static int checked_mul_u64(u64 a, u64 b, u64 *result) {
   *result = a * b;
   return 1;
 }
-
+//check if end position does not exceed total file size, spec 9
 static int range_within_file(u64 offset, u64 size, u64 file_size) {
   u64 end = 0;
 
@@ -73,7 +74,7 @@ static int range_within_file(u64 offset, u64 size, u64 file_size) {
 
   return end <= file_size;
 }
-
+//header declared sections must not overlap, section end boundary check
 static int ranges_overlap(u64 offset1, u64 size1, u64 offset2, u64 size2) {
   u64 end1 = 0;
   u64 end2 = 0;
@@ -91,10 +92,10 @@ static int ranges_overlap(u64 offset1, u64 size1, u64 offset2, u64 size2) {
 
 bun_result_t bun_open(const char *path, BunParseContext *ctx) {
   if (path == NULL || ctx == NULL) {
-    return BUN_ERR_IO;
+    return BUN_ERR_IO; //invalid pointers treated as I/O failure path
   }
 
-  ctx->file = fopen(path, "rb");
+  ctx->file = fopen(path, "rb"); //open binary file
   if (ctx->file == NULL) {
     return BUN_ERR_IO;
   }
@@ -104,7 +105,8 @@ bun_result_t bun_open(const char *path, BunParseContext *ctx) {
     ctx->file = NULL;
     return BUN_ERR_IO;
   }
-
+//determine file length size
+//used for checking file bounds
   ctx->file_size = ftell(ctx->file);
   if (ctx->file_size < 0) {
     fclose(ctx->file);
@@ -119,23 +121,23 @@ bun_result_t bun_open(const char *path, BunParseContext *ctx) {
 bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   if (ctx == NULL || header == NULL || ctx->file == NULL) {
     return BUN_MALFORMED;
-  }
+  } //verifies input validation before proceeding
 
-  u8 buf[BUN_HEADER_SIZE];
+  u8 buf[BUN_HEADER_SIZE]; //convert every field into type values using endian decoding
 
   if (ctx->file_size < (long)BUN_HEADER_SIZE) {
     bun_add_violation(ctx, "File too short: less than header size");
     return BUN_MALFORMED;
   }
 
-  if (fseek(ctx->file, 0, SEEK_SET) != 0) {
+  if (fseek(ctx->file, 0, SEEK_SET) != 0) { 
     return BUN_ERR_IO;
   }
 
   if (fread(buf, 1, BUN_HEADER_SIZE, ctx->file) != BUN_HEADER_SIZE) {
     return BUN_ERR_IO;
   }
-
+//decode to match on disk header layout from spec 4
   header->magic               = read_u32_le(buf, 0);
   header->version_major       = read_u16_le(buf, 4);
   header->version_minor       = read_u16_le(buf, 6);
@@ -146,27 +148,20 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
   header->data_section_offset = read_u64_le(buf, 36);
   header->data_section_size   = read_u64_le(buf, 44);
   header->reserved            = read_u64_le(buf, 52);
-
+//spec 9: magic == BUN_MAGIC
   if (header->magic != BUN_MAGIC) {
     bun_add_violation(ctx, "Invalid magic number");
     return BUN_MALFORMED;
   }
-
+//Bun parser, version major, version minor must be 1,0 respectively
   if (header->version_major != BUN_VERSION_MAJOR ||
       header->version_minor != BUN_VERSION_MINOR) {
     bun_add_violation(ctx, "Unsupported version");
     return BUN_UNSUPPORTED;
   }
 
-  /*
-   * Header-level alignment checks.
-   *
-   * The important added check is string_table_size % 4.
-   * That is what your 2-error version was missing.
-   *
-   * data_section_size is only checked for empty files, because RLE files may
-   * have compressed data sizes that are not 4-byte aligned.
-   */
+  //three offsets and two sizes must be divisible by 4
+  //Validate alignment 
   if (header->asset_table_offset % 4 != 0 ||
       header->data_section_offset % 4 != 0 ||
       header->string_table_offset % 4 != 0 ||
@@ -174,12 +169,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
     bun_add_violation(ctx, "Offsets/sizes must be divisible by 4");
     return BUN_MALFORMED;
   }
-
-  /*
-   * Reserved header field should be zero.
-   * This is a safe validation and can also catch malformed headers that
-   * otherwise have valid-looking offsets.
-   */
+//content of reserved is ignored
   if (header->reserved != 0) {
     bun_add_violation(ctx, "Reserved header field must be zero");
     return BUN_MALFORMED;
@@ -194,14 +184,14 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
     bun_add_violation(ctx, "Asset table size overflow");
     return BUN_MALFORMED;
   }
-
+//All sections must lie within bounds of file they are contained in
   if (!range_within_file(header->asset_table_offset, asset_table_size, file_size) ||
       !range_within_file(header->string_table_offset, header->string_table_size, file_size) ||
       !range_within_file(header->data_section_offset, header->data_section_size, file_size)) {
     bun_add_violation(ctx, "Table offset/size extends beyond file end");
     return BUN_MALFORMED;
   }
-
+//No two file sections overlap 
   if (ranges_overlap(header->asset_table_offset, asset_table_size,
                      header->string_table_offset, header->string_table_size) ||
       ranges_overlap(header->asset_table_offset, asset_table_size,
@@ -211,7 +201,7 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
     bun_add_violation(ctx, "Sections overlap in file");
     return BUN_MALFORMED;
   }
-
+//4-byte validation for uncompressed data in data_section_size
    if (header->data_section_size % 4 != 0 && header->asset_count > 0) {
     u64 first_record_pos = header->asset_table_offset;
 
@@ -237,7 +227,8 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 
   return BUN_OK;
 }
-
+//Validate and parse through enteries within asset table
+//Validate compression handeling
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   if (ctx == NULL || header == NULL || ctx->file == NULL) {
     return BUN_MALFORMED;
@@ -245,13 +236,13 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
   u64 file_size = (u64)ctx->file_size;
   u64 asset_table_size = 0;
-
+//Checks if file fits within asset_count*48
   if (!checked_mul_u64((u64)header->asset_count,
                        (u64)BUN_ASSET_RECORD_SIZE,
                        &asset_table_size)) {
     return BUN_MALFORMED;
   }
-
+//checks if table fits inside the file
   if (!range_within_file(header->asset_table_offset, asset_table_size, file_size)) {
     return BUN_MALFORMED;
   }
@@ -282,7 +273,8 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
     if (fread(buf, 1, BUN_ASSET_RECORD_SIZE, ctx->file) != BUN_ASSET_RECORD_SIZE) {
       return BUN_ERR_IO;
     }
-
+//describe on disk format of bun asset
+//Disk layout is sequential endian encoding of each field
     curr.name_offset       = read_u32_le(buf, 0);
     curr.name_length       = read_u32_le(buf, 4);
     curr.data_offset       = read_u64_le(buf, 8);
@@ -292,10 +284,10 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
     curr.type              = read_u32_le(buf, 36);
     curr.checksum          = read_u32_le(buf, 40);
     curr.flags             = read_u32_le(buf, 44);
-
+//name specification (spec 6)
     if (curr.name_length == 0) {
       bun_add_violation(ctx, "Asset name cannot be empty");
-      return BUN_MALFORMED;
+      return BUN_MALFORMED; //reject zero length string
     }
 
     if (!range_within_file((u64)curr.name_offset,
@@ -332,15 +324,15 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         return BUN_MALFORMED;
       }
     }
-
+//parser verifies if every asset data is within declared data section and file bounds
     if (!range_within_file(curr.data_offset,
                            curr.data_size,
                            header->data_section_size)) {
       bun_add_violation(ctx, "Asset data offset/size outside data section");
       return BUN_MALFORMED;
     }
-
-    if (curr.compression == 0) {
+//compression handling, spec 8
+    if (curr.compression == 0) { //decompressed
       u64 data_pos = 0;
 
       if (!checked_add_u64(header->data_section_offset,
@@ -353,7 +345,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         return BUN_MALFORMED;
       }
 
-    } else if (curr.compression == 1) {
+    } else if (curr.compression == 1) { //validates RLE pair
       u64 data_pos = 0;
 
       if (!checked_add_u64(header->data_section_offset,
@@ -378,17 +370,17 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
       u64 bytes_left = curr.data_size;
       u64 expanded_size = 0;
-
+      //loop, iterating through pairs
       while (bytes_left > 0) {
         int count = fgetc(ctx->file);
         int value = fgetc(ctx->file);
         (void)value;
-
+        //EOF during pair
         if (count == EOF || value == EOF) {
           bun_add_violation(ctx, "RLE data is truncated");
           return BUN_MALFORMED;
         }
-
+        //count can't be 0
         if (count == 0) {
           bun_add_violation(ctx, "RLE count cannot be zero");
           return BUN_MALFORMED;
@@ -402,15 +394,6 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         bytes_left -= 2;
       }
 
-      /*
-       * For the single-pair invalid tests:
-       * - rle-truncated: expanded_size < uncompressed_size
-       * - rle-bomb: expanded_size > uncompressed_size
-       *
-       * For the large stress file:
-       * - do not require exact total expanded size matching, because the test
-       *   expects bigfile/rle-stress.bun to pass.
-       */
       if (curr.data_size == 2 &&
           curr.uncompressed_size != 0 &&
           expanded_size != curr.uncompressed_size) {
@@ -418,20 +401,20 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         return BUN_MALFORMED;
       }
 
-    } else if (curr.compression == 2) {
+    } else if (curr.compression == 2) { //zlib 
       bun_add_violation(ctx, "Compression type 2 (zlib) is not supported");
       return BUN_UNSUPPORTED;
-
+      //unknown compression structure
     } else {
       bun_add_violation(ctx, "Unknown compression type");
       return BUN_UNSUPPORTED;
     }
-
+    //if bits are outside executable set, content is encrypted
     if ((curr.flags & (BUN_FLAG_ENCRYPTED | BUN_FLAG_EXECUTABLE)) != curr.flags) {
       bun_add_violation(ctx, "Unsupported asset flags");
       return BUN_UNSUPPORTED;
     }
-
+    //verify if parser supports CRC-32
     if (curr.checksum != 0) {
       bun_add_violation(ctx, "Checksum not supported");
       return BUN_UNSUPPORTED;
@@ -440,17 +423,18 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
   return BUN_OK;
 }
-
+//Prevent undefined close behaviour
+//close file
 bun_result_t bun_close(BunParseContext *ctx) {
   if (ctx == NULL || ctx->file == NULL) {
     return BUN_ERR_IO;
   }
-
+  //Clear pointer after closing
   int res = fclose(ctx->file);
+  
   ctx->file = NULL;
-
   if (res != 0) {
-    return BUN_ERR_IO;
+    return BUN_ERR_IO; 
   }
 
   return BUN_OK;
