@@ -204,44 +204,50 @@ bun_result_t bun_parse_header(BunParseContext *ctx, BunHeader *header) {
 // are within their respective sections, and checks for unsupported
 
 bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
-  if (ctx == NULL || header == NULL || ctx->file == NULL) {
+  //check if context, header, and file pointer are missing.
+  if (ctx == NULL || header == NULL || ctx->file == NULL) { 
       return BUN_MALFORMED;
   }
 
   u64 file_size = (u64)ctx->file_size;
-  u64 asset_table_size = 0;
-
+  u64 asset_table_size = 0; //initialise table size
+  //specification: asset_count * 48
+  //if overflow is detected it returns malformed
   if (!checked_mul_u64((u64)header->asset_count,
                        (u64)BUN_ASSET_RECORD_SIZE,
                        &asset_table_size)) {
       return BUN_MALFORMED;
   }
-
+  //table lies within file bounds
+  //out of bounds table variables are rejected
   if (!range_within_file(header->asset_table_offset, asset_table_size, file_size)) {
       return BUN_MALFORMED;
   }
+  //iterate through asset 
   for (u32 i = 0; i < header->asset_count; i++) {
       u8 buf[BUN_ASSET_RECORD_SIZE];
       BunAssetRecord curr;
-      u64 recordOff =0;
-      u64 recordPos =0;
+      u64 recordOff =0; //byte offset recorded inside table
+      u64 recordPos =0; //file position
+      //calculates i*record_size
       if(!checked_mul_u64((u64)i,(u64)BUN_ASSET_RECORD_SIZE,&recordOff)){
         return BUN_MALFORMED;
       }
       if(!checked_add_u64(header->asset_table_offset,recordOff,&recordPos)){
         return BUN_MALFORMED;
       }
+    //check if record is outside file
       if(!range_within_file(recordPos,(u64)BUN_ASSET_RECORD_SIZE,file_size)){
         return BUN_MALFORMED;
       }
       if(fseek(ctx->file,(long)recordPos,SEEK_SET)!=0){
         return BUN_ERR_IO;
       }
-
+    //reads one full record
       if (fread(buf, 1, BUN_ASSET_RECORD_SIZE, ctx->file) != BUN_ASSET_RECORD_SIZE) {
           return BUN_ERR_IO;
       }
-
+    //decode endian bytes
       curr.name_offset       = read_u32_le(buf, 0);
       curr.name_length       = read_u32_le(buf, 4);
       curr.data_offset       = read_u64_le(buf, 8);
@@ -251,10 +257,12 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       curr.type              = read_u32_le(buf, 36);
       curr.checksum          = read_u32_le(buf, 40);
       curr.flags             = read_u32_le(buf, 44);
+    //empty string is rejected
       if(curr.name_length==0){
         bun_add_violation(ctx, "Asset name cannot be empty");
         return BUN_MALFORMED;
       }
+    //validate name string inside table
       if(!range_within_file((u64)curr.name_offset,(u64)curr.name_length,header->string_table_size)){
         bun_add_violation(ctx, "Asset name offset/length outside string table");
         return BUN_MALFORMED;
@@ -263,12 +271,14 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       if(!checked_add_u64(header->string_table_offset,(u64)curr.name_offset,&offsetName)){
         return BUN_MALFORMED;
       }
+    //check if name bytes are inside file
       if(!range_within_file(offsetName,(u64)curr.name_length,file_size)){
         return BUN_MALFORMED;
       }
       if(fseek(ctx->file,(long)offsetName,SEEK_SET)!=0){
         return BUN_ERR_IO;
       }
+    //loop to read each name, prints ASCII range
       for (u32 j=0; j<curr.name_length; j++) {
         int ch = fgetc(ctx->file);
         if (ch==EOF) {
@@ -284,6 +294,8 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
           bun_add_violation(ctx, "Asset data offset/size outside data section");
           return BUN_MALFORMED;
       }
+    //specification 8: compression handling 
+    //RLE consists of a pair(count,byte)
       if(curr.compression==0){
       }else if(curr.compression==1){
          if((curr.data_size%2)!=0){
@@ -300,35 +312,41 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         if(fseek(ctx->file,(long)validOffData,SEEK_SET)!=0){
           return BUN_ERR_IO;
         }
-        u64 bytesCurr = curr.data_size;
-        u64 bytesOut = 0;
+        u64 bytesCurr = curr.data_size; //encoded bytes remaining 
+        u64 bytesOut = 0; //uncompressed length that is accumulated
+        //while loops read RLE pairs
         while(bytesCurr>0){
           int count = fgetc(ctx->file);
           int value = fgetc(ctx->file);
           (void)value;
+          //unreadable pair = malformed
           if(count==EOF||value==EOF){
             return BUN_MALFORMED;
           }
+          //invalid RLE pair, zero pair 
           if(count==0){
             bun_add_violation(ctx, "RLE count cannot be zero");
             return BUN_MALFORMED;
           }
+          //checks for overflow after run length is collected
           u64 newBytes =0;
           if(!checked_add_u64(bytesOut,(u64)(u8)count,&newBytes)){
             return BUN_MALFORMED;
           }
           bytesOut = newBytes;
+          //decoded size can't go beyond declared uncompressed size
           if(bytesOut>curr.uncompressed_size){
             bun_add_violation(ctx, "RLE decompressed size exceeds uncompressed_size (decompression bomb)");
             return BUN_MALFORMED;
           }
           bytesCurr-=2;
         }
+        //specification: uncompressed size = decoded length
         if(bytesOut!=curr.uncompressed_size){
           bun_add_violation(ctx, "RLE decompressed size does not match uncompressed_size");
           return BUN_MALFORMED;
         }
-      }else if(curr.compression ==2){
+      }else if(curr.compression ==2){ //zlib
         bun_add_violation(ctx, "Compression type 2 (zlib) is not supported");
         return BUN_UNSUPPORTED;
       }else{
@@ -340,7 +358,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         return BUN_UNSUPPORTED;
       }
 
-      
+      //verifies if CRC feature not implemented
       if (curr.checksum != 0) {
         bun_add_violation(ctx, "Checksum not supported (only 0 is allowed)");
         return BUN_UNSUPPORTED;
