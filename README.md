@@ -166,6 +166,19 @@ typedef enum {
 
 Test files are located in `tests/samples/`:
 
+## Running Sanitizer Tests
+
+The repository includes a `sanitizer_test_runner.sh` script. This script runs all tests against the valid and invalid sample files using:
+
+- AddressSanitizer
+- UndefinedBehaviorSanitizer
+
+To run the sanitizer test script, use the following commands from the project root:
+
+```bash
+chmod +x sanitizer_test_runner.sh
+./sanitizer_test_runner.sh
+
 - `valid/` — Well-formed BUN files
 - `invalid/` — Malformed files designed to test rejection logic
 
