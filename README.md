@@ -2,7 +2,7 @@
 
 A secure-by-design parser for the BUN (Bun Archive) file format, implemented in C with comprehensive validation and security checks.
 
-# Contributors
+## Contributors
 
 Group 23
 
