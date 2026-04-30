@@ -186,3 +186,4 @@ Run the test suite:
 ```bash
 ./sanitizer_test_runner.sh
 ```
+The sanitizer runner assumes it is executed from the project root, that the Makefile can build bun_parser using the all target, and that valid and invalid sample BUN files are available under tests/samples/valid and tests/samples/invalid. It also assumes GCC in the CITS3007 environment supports AddressSanitizer and UndefinedBehaviorSanitizer, and that the script has permission to create logs under docs/evidence.
