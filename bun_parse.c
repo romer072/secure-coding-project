@@ -315,6 +315,7 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
         u64 bytesCurr = curr.data_size; //encoded bytes remaining 
         u64 bytesOut = 0; //uncompressed length that is accumulated
         //while loops read RLE pairs
+        //Implementing fgetc to call (count, value), run ended by EOF: https://michaeldipperstein.github.io/rle.html
         while(bytesCurr>0){
           int count = fgetc(ctx->file);
           int value = fgetc(ctx->file);
