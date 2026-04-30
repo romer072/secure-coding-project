@@ -246,35 +246,35 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
   if (!range_within_file(header->asset_table_offset, asset_table_size, file_size)) {
     return BUN_MALFORMED;
   }
-
+  //for loop iterating over asset entries
   for (u32 i = 0; i < header->asset_count; i++) {
-    u8 buf[BUN_ASSET_RECORD_SIZE];
-    BunAssetRecord curr;
+    u8 buf[BUN_ASSET_RECORD_SIZE]; //allocate buffer for asset record 
+    BunAssetRecord curr; //declare parsed variable
 
-    u64 record_offset = 0;
-    u64 record_pos = 0;
-
+    u64 record_offset = 0; //byte offset within asset table
+    u64 record_pos = 0; //byte position of record
+    //prevent overflow when i becomes too large
     if (!checked_mul_u64((u64)i, (u64)BUN_ASSET_RECORD_SIZE, &record_offset)) {
       return BUN_MALFORMED;
     }
-
+    //prevent overflow when addressing file position
     if (!checked_add_u64(header->asset_table_offset, record_offset, &record_pos)) {
       return BUN_MALFORMED;
     }
-
+    //checks if asset record fits inside the file layout
     if (!range_within_file(record_pos, (u64)BUN_ASSET_RECORD_SIZE, file_size)) {
       return BUN_MALFORMED;
     }
-
+    //move file pointer to start of asset record 
     if (fseek(ctx->file, (long)record_pos, SEEK_SET) != 0) {
       return BUN_ERR_IO;
     }
-
+    
     if (fread(buf, 1, BUN_ASSET_RECORD_SIZE, ctx->file) != BUN_ASSET_RECORD_SIZE) {
       return BUN_ERR_IO;
     }
-//describe on disk format of bun asset
-//Disk layout is sequential endian encoding of each field
+    //describe on disk format of bun asset
+    //Disk layout is sequential endian encoding of each field
     curr.name_offset       = read_u32_le(buf, 0);
     curr.name_length       = read_u32_le(buf, 4);
     curr.data_offset       = read_u64_le(buf, 8);
@@ -284,12 +284,12 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
     curr.type              = read_u32_le(buf, 36);
     curr.checksum          = read_u32_le(buf, 40);
     curr.flags             = read_u32_le(buf, 44);
-//name specification (spec 6)
+    //name specification (spec 6)
     if (curr.name_length == 0) {
       bun_add_violation(ctx, "Asset name cannot be empty");
       return BUN_MALFORMED; //reject zero length string
     }
-
+    //check if name slice(offset,length) fits within declared string table
     if (!range_within_file((u64)curr.name_offset,
                            (u64)curr.name_length,
                            header->string_table_size)) {
@@ -297,13 +297,14 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       return BUN_MALFORMED;
     }
 
-    u64 name_pos = 0;
+    u64 name_pos = 0; //declare file position for asset name
+    //Prevent int overflow
     if (!checked_add_u64(header->string_table_offset,
                          (u64)curr.name_offset,
                          &name_pos)) {
       return BUN_MALFORMED;
     }
-
+    //validate if name_pos, name_pos_length lies within file bounds
     if (!range_within_file(name_pos, (u64)curr.name_length, file_size)) {
       return BUN_MALFORMED;
     }
@@ -311,27 +312,27 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
     if (fseek(ctx->file, (long)name_pos, SEEK_SET) != 0) {
       return BUN_ERR_IO;
     }
-
+    //for loop to iterate through each byte of name
     for (u32 j = 0; j < curr.name_length; j++) {
-      int ch = fgetc(ctx->file);
+      int ch = fgetc(ctx->file); //read one character byte from file
 
-      if (ch == EOF) {
+      if (ch == EOF) { //end of file
         return BUN_ERR_IO;
       }
 
-      if (ch < 32 || ch > 126) {
+      if (ch < 32 || ch > 126) { //enforces printable ASCII values
         bun_add_violation(ctx, "Asset name contains non-printable characters");
         return BUN_MALFORMED;
       }
     }
-//parser verifies if every asset data is within declared data section and file bounds
+    //parser verifies if every asset data is within declared data section and file bounds
     if (!range_within_file(curr.data_offset,
                            curr.data_size,
                            header->data_section_size)) {
       bun_add_violation(ctx, "Asset data offset/size outside data section");
-      return BUN_MALFORMED;
+      return BUN_MALFORMED; 
     }
-//compression handling, spec 8
+    //compression handling, spec 8
     if (curr.compression == 0) { //decompressed
       u64 data_pos = 0;
 
@@ -346,24 +347,24 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
       }
 
     } else if (curr.compression == 1) { //validates RLE pair
-      u64 data_pos = 0;
-
+      u64 data_pos = 0; //64 bit variable for file position
+      //checks for overflow, ensuring calculation does not exceed data_pos
       if (!checked_add_u64(header->data_section_offset,
                            curr.data_offset,
                            &data_pos)) {
         return BUN_MALFORMED;
       }
-
+      //verifies if RLE is within file bounds
       if (!range_within_file(data_pos, curr.data_size, file_size)) {
         bun_add_violation(ctx, "RLE data extends beyond file end");
         return BUN_MALFORMED;
       }
-
+      //Check if RLE length is even since it stores in pairs
       if ((curr.data_size % 2) != 0) {
         bun_add_violation(ctx, "RLE compressed data must have even size");
         return BUN_MALFORMED;
       }
-
+      //moves file pointer to start of RLE data
       if (fseek(ctx->file, (long)data_pos, SEEK_SET) != 0) {
         return BUN_ERR_IO;
       }
@@ -393,7 +394,6 @@ bun_result_t bun_parse_assets(BunParseContext *ctx, const BunHeader *header) {
 
         bytes_left -= 2;
       }
-
       if (curr.data_size == 2 &&
           curr.uncompressed_size != 0 &&
           expanded_size != curr.uncompressed_size) {
