@@ -214,12 +214,12 @@ exit code: 0
 
 === Testing tests/samples/invalid/01-bad-magic.bun ===
  BUN Malformed (error code: 1)
-- Invalid magic number: expected 0x304E5542
+- Invalid magic number
 exit code: 1
 
 === Testing tests/samples/invalid/02-bad-version.bun ===
  BUN Unsupported (error code: 2)
-- Unsupported version: only 1.0 is supported
+- Unsupported version
 exit code: 2
 
 === Testing tests/samples/invalid/03-bad-offset-alignment.bun ===
@@ -249,12 +249,12 @@ exit code: 1
 
 === Testing tests/samples/invalid/08-truncated-file.bun ===
  BUN Malformed (error code: 1)
-- File too short: less than header size (60 bytes)
+- File too short: less than header size
 exit code: 1
 
 === Testing tests/samples/invalid/09-misaligned-section-size.bun ===
  BUN Malformed (error code: 1)
-- Offsets/sizes must be divisible by 4
+- Uncompressed data section size must be divisible by 4
 exit code: 1
 
 === Testing tests/samples/invalid/10-overlapping-with-nonprintable.bun ===
@@ -284,10 +284,12 @@ exit code: 1
 
 === Testing tests/samples/invalid/15-rle-bomb.bun ===
  BUN Malformed (error code: 1)
-- Offsets/sizes must be divisible by 4
+- RLE uncompressed size does not match declared size
 exit code: 1
 
 === Testing tests/samples/invalid/16-rle-truncated.bun ===
  BUN Malformed (error code: 1)
-- Offsets/sizes must be divisible by 4
+- RLE uncompressed size does not match declared size
 exit code: 1
+
+=== UndefinedBehaviorSanitizer run completed ===

@@ -154,9 +154,25 @@ int main(int argc, char *argv[]) {
         bun_close(&ctx);
         return BUN_ERR_IO;
     }
-    fseek(ctx.file, (long)header.string_table_offset, SEEK_SET);
-    fread(string_table, 1, (size_t)header.string_table_size, ctx.file);
+        if (fseek(ctx.file, (long)header.string_table_offset, SEEK_SET) != 0) {
+        fprintf(stderr, "Error: failed to seek to string table\n");
+        free(string_table);
+        bun_close(&ctx);
+        return BUN_ERR_IO;
+    }
+    // This moves the file pointer to the start of the string table and checks whether the seek succeeded.
+
+    if (fread(string_table, 1, (size_t)header.string_table_size, ctx.file)
+        != (size_t)header.string_table_size) {
+        fprintf(stderr, "Error: failed to read string table\n");
+        free(string_table);
+        bun_close(&ctx);
+        return BUN_ERR_IO;
+    }
+    // This reads the string table and verifies that the exact expected number of bytes was read.
+
     string_table[header.string_table_size] = '\0';
+    // This adds a null terminator after the bytes read from the string table. This makes later string-style printing safer because C string functions expect a terminating '\0'
 
     // Read data section into memory
     // The data section stores the actual payload data for each asset
@@ -167,9 +183,26 @@ int main(int argc, char *argv[]) {
         bun_close(&ctx);
         return BUN_ERR_IO;
     }
-    fseek(ctx.file, (long)header.data_section_offset, SEEK_SET);
-    fread(data_section, 1, (size_t)header.data_section_size, ctx.file);
+    // This allocates memory for the data section and checks whether allocation succeeded.
 
+    if (fseek(ctx.file, (long)header.data_section_offset, SEEK_SET) != 0) {
+        fprintf(stderr, "Error: failed to seek to data section\n");
+        free(data_section);
+        free(string_table);
+        bun_close(&ctx);
+        return BUN_ERR_IO;
+    }
+    // Moves the file pointer to the start of the string table and check whether the seek succeeded.
+
+    if (fread(data_section, 1, (size_t)header.data_section_size, ctx.file)
+        != (size_t)header.data_section_size) {
+        fprintf(stderr, "Error: failed to read data section\n");
+        free(data_section);
+        free(string_table);
+        bun_close(&ctx);
+        return BUN_ERR_IO;
+    }
+    // This reads the string table and verifies that the exact expected number of bytes was read.
     // === Re-read asset records and print ===
     // We re-read the asset table because bun_parse_assets() doesn't store
     // the parsed records for us to access. Each asset record is 48 bytes.
