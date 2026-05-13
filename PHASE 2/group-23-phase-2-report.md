@@ -1,7 +1,7 @@
 ---
 title: |
   CITS3007 Secure Coding \
-  group XX phase 2 report
+  group 23 phase 2 report
 date: Semester 1, 2026
 colorlinks: true
 fontsize: 12pt
@@ -44,12 +44,12 @@ header-includes: |
   Delete or replace placeholder text in [square brackets] before submission.
 -->
 
-**Group XX members:**
+**Group 23 members:**
 
-- Firstname Lastname, 12345678, \@username,
-- Firstname Lastname, 12345678, \@username,
-- Firstname Lastname, 12345678, \@username,
-- Firstname Lastname, 12345678, \@username,
+- Rohma Rehman, 23845362, \@romer072,
+- Ritch Elbert Rayawang, 23940731, \@Ritch-Wang,
+- Kavya Anil, 24217516, \@kvn776,
+- Alan Ling, 23843412, \@AlanLingYS
 
 
 ## Introduction
