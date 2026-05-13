@@ -54,11 +54,11 @@ header-includes: |
 
 ## Introduction
 
-[Identify which codebase you chose to test (group number) and briefly explain why you
-chose it over the alternative assignment. Include any general observations about the
-codebase -- its structure, apparent coding practices, use of libraries -- that are
-relevant to your testing approach.]
+Target Selection: Group 6
 
+We selected Group 6 after comparing both codebases. The critical factor was a clear security vulnerability in Group 6's name buffer handling (line ~327: `char name[asset.name_length + 1]`), which allocates stack memory based on an unchecked u32 field. An attacker can exploit this by setting `name_length` to a large value (e.g., 1MB), causing immediate stack overflow. This vulnerability meets Phase 2's core requirement of "reproducible findings". It is deterministic, easily triggered, and produces clear observable failure.
+
+In contrast, Group 19 demonstrates superior defensive programming (comprehensive overflow checking, safe memory patterns, structured error handling). However, its defensive design significantly increases the effort required to discover non-obvious flaws, and carries substantial risk of finding zero vulnerabilities despite thorough testing. For Phase 2, we prioritized identifying demonstrable security issues over selecting the codebase with better engineering practices. Group 6's 642-line codebase with fewer overlapping defensive layers provides a manageable scope with realistic finding targets, enabling systematic coverage of all mandatory spec requirements within project constraints.
 
 ## Assumptions and method
 
