@@ -86,45 +86,6 @@ normal parser execution.]
      section with a description of the tests you ran and their outcomes, and present a
      well-argued case for the codebase's correctness. See the conclusion guidance. -->
 
-### Finding F- --
-
-- ID: F- --
-- Category: [Crash / Excessive memory use / Hang / Incorrect output]
-- Spec reference: [e.g. Section 9.2 -- Sections lie within file]
-- Assumptions: [e.g. Any interpretation of the spec required for this to succeed]
-
-**Description**
-
-[A clear, concise description of the flaw.]
-
-**Expected behaviour**
-
-[What a correct parser should do in this case, with reference to the spec.]
-
-**Actual behaviour**
-
-[What the target parser actually does.]
-
-**Reproduction steps**
-
-[Step-by-step instructions. A marker must be able to follow these on the SDE and
-observe the failure. Include:]
-
-1. Build the target parser with the following flags: `[flags, or "default"]`
-2. Run: `./bun_parser [input_file]`
-3. [Additional steps if needed, e.g. memory limit via Docker]
-
-
-Expected outcome: [e.g. exit with status 1 (`BUN_MALFORMED`)]
-
-Actual outcome: [e.g. segmentation fault (exit status 139)]
-
-<!-- You may provide Makefile targets for individual findings if desired -->
-
-Alternatively, run `make reproduce_f1` in the reproduction package to execute this test
-automatically.
-
-<!-- Add further findings below by copying the subsection above. -->
 
 
 ### Finding F-01
@@ -321,6 +282,418 @@ u64 real_data_offset = header->data_section_offset + asset.data_offset;
 
 After applying these checks, the same `overflow_data_offset.bun` file should be rejected instead of parsed successfully.
 
+
+### Finding F-02
+
+- ID: F-02
+- Category: Crash / excessive memory use
+- Spec reference: Section 9.2 -- asset names must lie within the declared string table
+- Assumptions: The `name_offset` and `name_length` fields are interpreted as values pointing into the string table. Although the name range must be inside the string table, a parser should also enforce a practical maximum asset name length before allocating memory to store the name.
+
+**Description**
+
+The target parser allocates the asset name using a variable-length array on the stack:
+
+```c
+char name[asset.name_length + 1];
+```
+
+This is unsafe because `asset.name_length` is controlled by the BUN file. The parser checks whether the name range lies inside the string table, but it does not appear to enforce a practical maximum name length before allocating the stack buffer. A malicious BUN file can therefore declare a very large string table and a very large `name_length`, making the range check pass while still causing the parser to allocate a huge buffer on the stack.
+
+For this test case, the malicious BUN file uses a very large asset name:
+
+```text
+name_offset = 0
+name_length = 16000000
+string_table_size = 16000000
+```
+
+The name is technically within the declared string table, so the parser may accept the bounds check. However, when it reaches the stack allocation, it attempts to allocate approximately 16 MB for the asset name on the stack. This can exhaust the process stack and cause a crash.
+
+**Expected behaviour**
+
+A correct parser should reject this file as malformed before allocating the asset name buffer. Even if the name range is inside the declared string table, the parser should enforce a reasonable maximum asset name length.
+
+The expected error should be equivalent to:
+
+```text
+Asset name length is too large
+```
+
+or another clear malformed-file error indicating that the asset name length exceeds an implementation-defined safe limit.
+
+**Actual behaviour**
+
+The parser prints the header successfully, but then crashes before printing the asset record. This shows that the header and section layout are accepted, and the failure occurs while parsing the asset record. The crash is consistent with the parser attempting to allocate a stack buffer based on the file-controlled `name_length` value.
+
+In the reproduced test, the file declares a string table size of `16000000` bytes and an asset name length of `16000000` bytes. Because the declared name range fits inside the string table, the parser proceeds past the bounds check. It then reaches the vulnerable stack allocation and terminates with a segmentation fault.
+
+The vulnerable operation is:
+
+```c
+char name[asset.name_length + 1];
+```
+
+Since `asset.name_length` is taken from the input file, the parser should not use it directly for stack allocation without enforcing a maximum.
+
+The important reproduced output is:
+
+```text
+=== BUN File Summary ===
+
+--- HEADER ---
+Magic:                 BUN0
+Version:               1.0
+Asset count:           1
+Asset table offset:    60 bytes
+String table offset:   108 bytes
+String table size:     16000000 bytes
+Data section offset:   16000108 bytes
+Data section size:     4 bytes
+Reserved:              0x0
+
+zsh: segmentation fault  ./bun_parser huge_name_stack_crash.bun
+```
+
+This demonstrates a concrete crash rather than only a theoretical issue.
+
+**Reproduction steps**
+
+The following steps reproduce the issue from a clean checkout of the target parser.
+
+1. Build the target parser with the default project build command:
+
+   ```sh
+   make
+   ```
+
+   If compiling manually, use:
+
+   ```sh
+   gcc -std=c11 -Wall -Wextra -g -o bun_parser bun_parse.c
+   ```
+
+2. Modify `bunfile_generator.py` so that it writes the malicious output file:
+
+   ```python
+   out_path = Path("huge_name_stack_crash.bun")
+   ```
+
+3. In `bunfile_generator.py`, define a very large asset name and a small valid payload:
+
+   ```python
+   huge_name_length = 16_000_000
+   asset_name = b"A" * huge_name_length
+   asset_payload = b"DATA"
+   asset_count = 1
+   ```
+
+4. Ensure the asset record uses the large name length and a normal uncompressed payload:
+
+   ```python
+   write_asset_record(
+       f,
+       name_offset = 0,
+       name_length = len(asset_name),
+       data_offset = 0,
+       data_size   = len(asset_payload),
+       uncompressed_size = 0,
+       compression = COMPRESS_NONE,
+   )
+   ```
+
+5. Generate the malformed BUN file:
+
+   ```sh
+   python3 bunfile_generator.py
+   ```
+
+   This should create:
+
+   ```text
+   huge_name_stack_crash.bun
+   ```
+
+6. Run the target parser on the generated file:
+
+   ```sh
+   ./bun_parser huge_name_stack_crash.bun
+   ```
+
+Expected outcome: The parser should reject the file as malformed before allocating the name buffer, returning `BUN_MALFORMED` or printing an error such as `Asset name length is too large`.
+
+Actual outcome: The parser prints the header and then terminates with a segmentation fault:
+
+```text
+zsh: segmentation fault  ./bun_parser huge_name_stack_crash.bun
+```
+
+Alternatively, run `make reproduce_f2` in the reproduction package if the submitted package includes this target.
+
+**Suggested fix**
+
+The parser should enforce a maximum asset name length before allocating memory for the name. For example:
+
+```c
+#define MAX_NAME_LENGTH 4096
+
+if (asset.name_length > MAX_NAME_LENGTH) {
+    add_error(ctx, "Asset name length is too large");
+    return BUN_MALFORMED;
+}
+```
+
+If the parser needs to support longer names, it should still avoid variable-length stack allocation. A safer approach is to allocate on the heap after checking a reasonable maximum size:
+
+```c
+char *name = malloc((size_t)asset.name_length + 1);
+if (name == NULL) {
+    add_error(ctx, "Failed to allocate asset name");
+    return BUN_ERR_IO;
+}
+```
+
+## Finding F-03
+
+- ID: F-03
+- Category: Incorrect output / invalid file accepted
+- Spec reference: Section 4.1 -- BUN header fields; reserved header field must be zero
+- Assumptions: The BUN specification requires the header `reserved` field to be set to zero. A parser should reject files where reserved fields contain non-zero values, because reserved fields are reserved for future use and should not contain arbitrary data in a valid BUN file.
+
+**Description**
+
+The target parser accepts a BUN file where the header `reserved` field is set to a non-zero value. The generated test file `bad_reserved.bun` is otherwise structurally valid, but the header contains the following reserved value:
+
+```text
+reserved = 0x12345678
+```
+
+The parser correctly reads and prints the reserved field, but it does not validate that the value is zero. This means a malformed header is treated as valid input. If the BUN specification requires the reserved field to be zero, the parser should reject the file during header validation rather than continuing to parse and print the asset records.
+
+The parser reads the reserved field from the header:
+
+```c
+header->reserved = read_u64_le(buf, 52);
+```
+
+However, there is no corresponding validation such as:
+
+```c
+if (header->reserved != 0) {
+    return BUN_MALFORMED;
+}
+```
+
+As a result, a file with a non-zero reserved field is still accepted and displayed as a valid BUN file.
+
+This is an incorrect output issue because the parser produces a normal successful file summary for an input that should have been rejected as malformed. The parser does not crash, but it gives the wrong result by accepting and displaying an invalid BUN file as if it were valid.
+
+**Expected behaviour**
+
+A correct parser should reject `bad_reserved.bun` as malformed during header validation. Since the `reserved` field is non-zero, the parser should return `BUN_MALFORMED` and print an error indicating that the reserved header field must be zero.
+
+The expected error should be equivalent to:
+
+```text
+Reserved field must be zero
+```
+
+or another clear malformed-file error indicating that the header contains an invalid reserved value.
+
+**Actual behaviour**
+
+The parser accepts the malformed file and prints a normal BUN file summary. This is incorrect because the parser should reject the header before printing asset information. The output shows that the parser reads and displays the non-zero reserved value:
+
+```text
+Reserved:              0x12345678
+```
+
+The parser then continues to parse the asset record and prints the asset data:
+
+```text
+--- Asset 1/1 ---
+Name:                  bad_reserved
+Name offset:           0 bytes
+Name length:           12 bytes
+Data offset:           0 bytes
+Data size:             4 bytes
+Uncompressed size:     0 bytes
+Compression:           0 (None)
+Type:                  0
+Checksum:              0 (Unused)
+Flags:                 0 (None)
+Data (text):           DATA
+```
+
+This confirms that the parser accepts an invalid reserved header field instead of rejecting the malformed file.
+
+**Reproduction steps**
+
+The following steps reproduce the issue from a clean checkout of the target parser using the original `bunfile_generator.py` script.
+
+1. Build the target parser with the default project build command:
+
+   ```sh
+   make
+   ```
+
+   If compiling manually, use:
+
+   ```sh
+   gcc -std=c11 -Wall -Wextra -g -o bun_parser bun_parse.c
+   ```
+
+2. Modify `bunfile_generator.py` so that it writes the malicious output file:
+
+   ```python
+   out_path = Path("bad_reserved.bun")
+   ```
+
+3. In `bunfile_generator.py`, define a non-zero reserved header value:
+
+   ```python
+   bad_reserved_value = 0x12345678
+   ```
+
+4. In the call to `write_header`, pass the non-zero reserved value:
+
+   ```python
+   write_header(
+       f,
+       asset_count         = asset_count,
+       asset_table_offset  = asset_table_offset,
+       string_table_offset = string_table_offset,
+       string_table_size   = string_table_size,
+       data_section_offset = data_section_offset,
+       data_section_size   = data_section_size,
+       reserved            = bad_reserved_value,
+   )
+   ```
+
+5. Keep the asset record as a simple valid uncompressed asset. This ensures that the only malformed part of the file is the non-zero reserved header field:
+
+   ```python
+   asset_name = b"bad_reserved"
+   asset_payload = b"DATA"
+
+   write_asset_record(
+       f,
+       name_offset = 0,
+       name_length = len(asset_name),
+       data_offset = 0,
+       data_size   = len(asset_payload),
+       uncompressed_size = 0,
+       compression = COMPRESS_NONE,
+   )
+   ```
+
+6. Generate the malformed BUN file:
+
+   ```sh
+   python3 bunfile_generator.py
+   ```
+
+   This should create:
+
+   ```text
+   bad_reserved.bun
+   ```
+
+7. Run the target parser on the generated file:
+
+   ```sh
+   ./bun_parser bad_reserved.bun
+   ```
+
+Expected outcome: The parser should reject the file as malformed, returning `BUN_MALFORMED` or printing an error such as `Reserved field must be zero`.
+
+Actual outcome: The parser accepts the malformed file and prints a normal BUN summary containing the invalid reserved value `0x12345678`.
+
+The important reproduced output is:
+
+```text
+=== BUN File Summary ===
+
+--- HEADER ---
+Magic:                 BUN0
+Version:               1.0
+Asset count:           1
+Asset table offset:    60 bytes
+String table offset:   108 bytes
+String table size:     12 bytes
+Data section offset:   120 bytes
+Data section size:     4 bytes
+Reserved:              0x12345678
+
+--- Asset 1/1 ---
+Name:                  bad_reserved
+Name offset:           0 bytes
+Name length:           12 bytes
+Data offset:           0 bytes
+Data size:             4 bytes
+Uncompressed size:     0 bytes
+Compression:           0 (None)
+Type:                  0
+Checksum:              0 (Unused)
+Flags:                 0 (None)
+Data (text):           DATA
+```
+
+Alternatively, run `make reproduce_f3` in the reproduction package if the submitted package includes this target.
+
+**Suggested fix**
+
+The parser should validate the reserved header field immediately after reading the header fields and before accepting the header as valid:
+
+```c
+if (header->reserved != 0) {
+    add_error(ctx, "Reserved field must be zero");
+    return BUN_MALFORMED;
+}
+```
+
+After applying this check, the same `bad_reserved.bun` file should be rejected during header parsing instead of being printed as a valid BUN file. This would change the parser behaviour from accepting an invalid header to correctly returning `BUN_MALFORMED`.
+
+### Finding F- --
+
+- ID: F- --
+- Category: [Crash / Excessive memory use / Hang / Incorrect output]
+- Spec reference: [e.g. Section 9.2 -- Sections lie within file]
+- Assumptions: [e.g. Any interpretation of the spec required for this to succeed]
+
+**Description**
+
+[A clear, concise description of the flaw.]
+
+**Expected behaviour**
+
+[What a correct parser should do in this case, with reference to the spec.]
+
+**Actual behaviour**
+
+[What the target parser actually does.]
+
+**Reproduction steps**
+
+[Step-by-step instructions. A marker must be able to follow these on the SDE and
+observe the failure. Include:]
+
+1. Build the target parser with the following flags: `[flags, or "default"]`
+2. Run: `./bun_parser [input_file]`
+3. [Additional steps if needed, e.g. memory limit via Docker]
+
+
+Expected outcome: [e.g. exit with status 1 (`BUN_MALFORMED`)]
+
+Actual outcome: [e.g. segmentation fault (exit status 139)]
+
+<!-- You may provide Makefile targets for individual findings if desired -->
+
+Alternatively, run `make reproduce_f1` in the reproduction package to execute this test
+automatically.
+
+<!-- Add further findings below by copying the subsection above. -->
+
 ## Conclusion
 
 [Summarise your findings. If flaws were found, briefly characterise their nature -- are
@@ -332,5 +705,3 @@ behaviour matched the expected behaviour. A thorough and well-evidenced conclusi
 this kind can receive full marks.
 
 Recommendations to the target group are welcome but not required.]
-
-
