@@ -130,8 +130,8 @@ automatically.
 ### Finding F-01
 
 - ID: F-01
-- Category: *!!!!!*
-- Spec reference: *!!!!!*
+- Category: Incorrect output
+- Spec reference: Sect. 9.2 - sections and asset data ranges must lie within the declared file sections
 - Assumptions: The `data_offset` and `data_size` fields are interpreted as unsigned 64-bit values. The asset payload range is expected to be fully contained within the declared data section. A parser should reject an asset if its data range starts outside the data section or extends past the end of the data section.
 
 **Description**
