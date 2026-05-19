@@ -86,9 +86,9 @@ normal parser execution.]
      section with a description of the tests you ran and their outcomes, and present a
      well-argued case for the codebase's correctness. See the conclusion guidance. -->
 
-### Finding F-01
+### Finding F- --
 
-- ID: F-01
+- ID: F- --
 - Category: [Crash / Excessive memory use / Hang / Incorrect output]
 - Spec reference: [e.g. Section 9.2 -- Sections lie within file]
 - Assumptions: [e.g. Any interpretation of the spec required for this to succeed]
@@ -160,13 +160,7 @@ The `data_offset` value is equivalent to `UINT64_MAX - 7`. When the parser compu
 18446744073709551608 + 16
 ```
 
-In unsigned 64-bit arithmetic, this wraps around to `8`. Since the declared data section size in the generated file is `20`, the vulnerable check effectively behaves as if it is checking:
-
-```c
-if (8 > 20)
-```
-
-This condition is false, so the parser incorrectly accepts the malformed asset even though the original `data_offset` is far outside the declared data section.
+In unsigned 64-bit arithmetic, this wraps around to `8`. Since the declared data section size in the generated file is small, the vulnerable check can incorrectly treat the wrapped result as being inside the data section. This condition is false, so the parser incorrectly accepts the malformed asset even though the original `data_offset` is far outside the declared data section.
 
 A second overflow can also occur when the parser calculates the real file offset of the asset data:
 
@@ -174,11 +168,11 @@ A second overflow can also occur when the parser calculates the real file offset
 u64 real_data_offset = header->data_section_offset + asset.data_offset;
 ```
 
-In the reproduced output, `header->data_section_offset` is `116`. Adding this to the malicious `data_offset` value wraps around to `108`, which is the string table offset. As a result, the parser reads bytes from the string table instead of the data section.
+In the reproduced output, this causes the calculated file offset to wrap around into an earlier section of the file. As a result, the parser reads bytes from the string table instead of the data section.
 
 **Expected behaviour**
 
-A correct parser should reject this file as malformed. The asset data range is invalid because the asset claims to start at byte offset `18446744073709551608` inside a data section that is only `20` bytes long. The parser should detect that the data range cannot fit inside the declared data section and return `BUN_MALFORMED` without attempting to print or read the asset payload.
+A correct parser should reject this file as malformed. The asset data range is invalid because the asset claims to start at byte offset `18446744073709551608` inside a very small data section. The parser should detect that the data range cannot fit inside the declared data section and return `BUN_MALFORMED` without attempting to print or read the asset payload.
 
 The expected error should be equivalent to:
 
@@ -193,18 +187,17 @@ or another clear malformed-file error indicating that the asset data range is ou
 The parser accepts the malformed file and prints a normal BUN file summary. The output shows that the parser accepts an impossible data range:
 
 ```text
-Data section size:     20 bytes
 Data offset:           18446744073709551608 bytes
 Data size:             16 bytes
 ```
 
-The parser also prints asset data bytes:
+The parser also prints asset data from the wrong file location:
 
 ```text
-Data (hex):            68 65 6c 6c 6f 00 00 00 48 65 6c 6c 6f 2c 20 42
+Data (text):           a_offsetABCDEFGH
 ```
 
-The first five bytes, `68 65 6c 6c 6f`, decode to the ASCII string `hello`. This is the asset name stored in the string table, not the intended asset payload. This confirms that the overflow caused the parser to read from the wrong section of the file instead of rejecting the malformed asset.
+The printed text begins with part of the asset name, `a_offset`, followed by payload bytes. This confirms that the overflow caused the parser to read from the wrong section of the file instead of rejecting the malformed asset.
 
 **Reproduction steps**
 
@@ -219,13 +212,13 @@ The following steps reproduce the issue from a clean checkout of the target pars
    If compiling manually, use:
 
    ```sh
-   gcc -std=c11 -Wall -Wextra -g -o bun_parse bun_parse.c
+   gcc -std=c11 -Wall -Wextra -g -o bun_parser bun_parse.c
    ```
 
 2. Modify `bunfile_generator.py` so that it writes the malicious output file:
 
    ```python
-   out_path = Path("overflow_data_range.bun")
+   out_path = Path("overflow_data_offset.bun")
    ```
 
 3. In `bunfile_generator.py`, define the malicious asset data range values:
@@ -235,7 +228,7 @@ The following steps reproduce the issue from a clean checkout of the target pars
    malicious_data_size   = 16
    ```
 
-4. In the call to `write_asset_record`, use the malicious values for `data_offset` and `data_size`:
+4. Use the malicious values in the asset record:
 
    ```python
    write_asset_record(
@@ -244,6 +237,8 @@ The following steps reproduce the issue from a clean checkout of the target pars
        name_length = len(asset_name),
        data_offset = malicious_data_offset,
        data_size   = malicious_data_size,
+       uncompressed_size = 0,
+       compression = COMPRESS_NONE,
    )
    ```
 
@@ -256,18 +251,18 @@ The following steps reproduce the issue from a clean checkout of the target pars
    This should create:
 
    ```text
-   overflow_data_range.bun
+   overflow_data_offset.bun
    ```
 
 6. Run the target parser on the generated file:
 
    ```sh
-   ./bun_parse overflow_data_range.bun
+   ./bun_parser overflow_data_offset.bun
    ```
 
 Expected outcome: The parser should reject the file as malformed, returning `BUN_MALFORMED` or printing an error such as `Asset data range exceeds data section`.
 
-Actual outcome: The parser accepts the malformed file and prints a BUN summary containing the impossible data offset `18446744073709551608`. It also prints data bytes from the wrong file section.
+Actual outcome: The parser accepts the malformed file and prints a BUN summary containing the impossible data offset `18446744073709551608`. It also prints data from the wrong file section.
 
 The important reproduced output is:
 
@@ -280,15 +275,15 @@ Version:               1.0
 Asset count:           1
 Asset table offset:    60 bytes
 String table offset:   108 bytes
-String table size:     8 bytes
-Data section offset:   116 bytes
-Data section size:     20 bytes
+String table size:     20 bytes
+Data section offset:   128 bytes
+Data section size:     16 bytes
 Reserved:              0x0
 
 --- Asset 1/1 ---
-Name:                  hello
+Name:                  overflow_data_offset
 Name offset:           0 bytes
-Name length:           5 bytes
+Name length:           20 bytes
 Data offset:           18446744073709551608 bytes
 Data size:             16 bytes
 Uncompressed size:     0 bytes
@@ -296,7 +291,7 @@ Compression:           0 (None)
 Type:                  0
 Checksum:              0 (Unused)
 Flags:                 0 (None)
-Data (hex):            68 65 6c 6c 6f 00 00 00 48 65 6c 6c 6f 2c 20 42
+Data (text):           a_offsetABCDEFGH
 ```
 
 Alternatively, run `make reproduce_f1` in the reproduction package if the submitted package includes this target.
@@ -324,7 +319,7 @@ if (asset.data_offset > UINT64_MAX - header->data_section_offset) {
 u64 real_data_offset = header->data_section_offset + asset.data_offset;
 ```
 
-After applying these checks, the same `overflow_data_range.bun` file should be rejected instead of parsed successfully.
+After applying these checks, the same `overflow_data_offset.bun` file should be rejected instead of parsed successfully.
 
 ## Conclusion
 
