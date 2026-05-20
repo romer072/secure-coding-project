@@ -1,8 +1,3 @@
-# Makefile for CITS3007 group project phase 2 report.
-#
-# Replace "XX" in the filenames below with your group number.
-# e.g. if your group is 3, change group-XX to group-03.
-
 SOURCE = group-23-phase-2-report.md
 OUTPUT = group-23-phase-2-report.pdf
 
@@ -10,6 +5,7 @@ PANDOC  = pandoc
 PFLAGS  = --shift-heading-level-by=-1 --table-of-contents --pdf-engine=typst
 
 TARGET_DIR = target
+SAN_CFLAGS = -std=c11 -Wall -Wextra -g -fsanitize=address,undefined -fno-omit-frame-pointer
 PARSER = $(TARGET_DIR)/bun_parser
 
 .PHONY: all clean reproduce reproduce_f01 reproduce_f02 reproduce_f03 reproduce_f04
@@ -19,7 +15,10 @@ all: $(OUTPUT)
 $(OUTPUT): $(SOURCE)
 	$(PANDOC) $(PFLAGS) -o $@ $<
 
-reproduce: reproduce_f01 reproduce_f02 reproduce_f03 reproduce_f04
+reproduce:
+	@echo "Building target with ASan + UBSan"
+	cd $(TARGET_DIR) && make clean && make CFLAGS="$(SAN_CFLAGS)"
+	$(MAKE) reproduce_f01 reproduce_f02 reproduce_f03 reproduce_f04
 
 reproduce_f01:
 	@echo "Running F-01: overflow data offset"
