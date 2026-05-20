@@ -36,7 +36,7 @@ reproduce_f04:
 	@echo "Running F-04: RLE mismatch tests"
 	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/04test_rle_zero_uncompressed.bun || true
 	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/04test_rle_size_mismatch_too_high.bun || true
-	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/04test_rle_size_mismatch_too_low.bun || true
+	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/05test_rle_size_mismatch_too_low.bun || true
 
 clean:
 	rm -f $(OUTPUT)
