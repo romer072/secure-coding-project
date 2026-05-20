@@ -12,35 +12,32 @@ PFLAGS  = --shift-heading-level-by=-1 --table-of-contents --pdf-engine=typst
 TARGET_DIR = target
 PARSER = $(TARGET_DIR)/bun_parser
 
-.PHONY: all clean reproduce reproduce_valid reproduce_stack reproduce_name_overflow
+.PHONY: all clean reproduce reproduce_f01 reproduce_f02 reproduce_f03 reproduce_f04
 
 all: $(OUTPUT)
 
 $(OUTPUT): $(SOURCE)
 	$(PANDOC) $(PFLAGS) -o $@ $<
 
-reproduce: reproduce_valid reproduce_stack reproduce_name_overflow
+reproduce: reproduce_f01 reproduce_f02 reproduce_f03 reproduce_f04
 
-reproduce_valid:
-	@echo "Running valid boundary test: test_max_name.bun"
-	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/valid/test_max_name.bun
+reproduce_f01:
+	@echo "Running F-01: overflow data offset"
+	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/01overflow_data_offset.bun || true
 
-reproduce_stack:
-	@echo "Running vulnerability test: stack overflow"
-	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/invalid/test_vuln_stack_overflow.bun || true
+reproduce_f02:
+	@echo "Running F-02: huge name stack crash"
+	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/02huge_name_stack_crash.bun || true
 
-reproduce_name_overflow:
-	@echo "Running invalid test: name offset + length overflow"
-	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/invalid/test_vuln_name_overflow.bun || true
+reproduce_f03:
+	@echo "Running F-03: bad reserved field"
+	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/03bad_reserved.bun || true
 
-reproduce_normal_file:
-	@echo "Running valid test: normal file"
-	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/valid/test_normal_file.bun || true
-
-
-reproduce_rle_overflow:
-	@echo "Running invalid test: rle overflow"
-	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/invalid/test_vuln_rle_overflow.bun || true
+reproduce_f04:
+	@echo "Running F-04: RLE mismatch tests"
+	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/04test_rle_zero_uncompressed.bun || true
+	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/04test_rle_size_mismatch_too_high.bun || true
+	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/04test_rle_size_mismatch_too_low.bun || true
 
 clean:
 	rm -f $(OUTPUT)
