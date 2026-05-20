@@ -34,8 +34,8 @@ reproduce_name_overflow:
 	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/invalid/test_vuln_name_overflow.bun || true
 
 reproduce_normal_file:
-	@echo "Running invalid test: normal file"
-	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/invalid/test_normal_file.bun || true
+	@echo "Running valid test: normal file"
+	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/valid/test_normal_file.bun || true
 
 
 reproduce_rle_overflow:
