@@ -37,6 +37,7 @@ reproduce_normal_file:
 	@echo "Running invalid test: normal file"
 	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/invalid/test_normal_file.bun || true
 
+
 reproduce_rle_overflow:
 	@echo "Running invalid test: rle overflow"
 	cd $(TARGET_DIR) && ./bun_parser ../tests/fixtures/invalid/test_vuln_rle_overflow.bun || true
