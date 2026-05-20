@@ -37,12 +37,7 @@ header-includes: |
 
   ```
 ---
-
-<!--
-  Replace all instances of "XX" with your group number.
-  Replace all instances of "YY" with the group number of the codebase you tested.
-  Delete or replace placeholder text in [square brackets] before submission.
--->
+# CITS3007 Phase 2 Findings Report
 
 **Group 23 members:**
 
@@ -68,31 +63,40 @@ For Phase 2, we prioritised a target that balanced realistic exploitability with
 
 ### General assumptions
 
-- Assuming that chosen group's codefile works for all valid files, hence we are only testing on invalid files
+- We assume the CITS3007 SDE (Ubuntu 20.04, x86-64) represents the intended execution environment and that all findings must be reproducible in this environment.
+- __We assume Group-06's parser correctly handles all valid BUN files conforming to the specification, and therefore focus our testing on malformed and adversarial inputs designed to trigger edge cases and vulnerabilities.__
+- We assume unsigned integer arithmetic in C follows the standard well-defined behavior where overflow wraps modulo 2^n for n-bit types.
+- We assume the parser is compiled with default C11 flags and standard C library functions (fread, malloc, etc.) behave as documented.
+- We interpret the BUN specification to require strict validation of all header fields, section boundaries, and data ranges before accepting and processing a file.
 
 
 ### Testing approach and tools
 
-[Describe how you systematically covered the mandatory parts of the BUN specification.
-Explain what techniques and tools you used -- for example: manual crafting of test
-inputs, fuzzing, Valgrind, sanitizers, GDB, static analysis. Note that tools are a
-legitimate part of your process, but each finding must ultimately be reproducible via
-normal parser execution.]
+We employed a systematic, code-review-driven approach to identify vulnerabilities across the mandatory parts of the BUN specification:
+
+Code Review and Static Analysis
+
+- Manually reviewed the target parser source code (bun_parse.c, bun.h, main.c) to identify potential security flaws in critical code paths
+- Focused on areas involving arithmetic operations, memory allocation, bounds checking, and compression handling
+- __Examined header validation logic (Section 4 of spec), asset record parsing (Section 5), and compression validation (Section 5.1)__
+
+Systematic Test Input Generation
+
+- Modified `bunfile_generator.py` to craft malformed BUN files targeting specific vulnerabilities:
+   - 01overflow_data_offset
+   - 02huge_name_stack_crash
+   - 03bad_reserved
+   - __04__
 
 
 ## Findings
-
-<!-- Repeat the subsection below for each finding. If you found no flaws, replace this
-     section with a description of the tests you ran and their outcomes, and present a
-     well-argued case for the codebase's correctness. See the conclusion guidance. -->
-
 
 
 ### Finding F-01
 
 - ID: F-01
 - Category: Incorrect output
-- Spec reference: Sect. 9.2 - sections and asset data ranges must lie within the declared file sections
+- Spec reference: ___
 - Assumptions: The `data_offset` and `data_size` fields are interpreted as unsigned 64-bit values. The asset payload range is expected to be fully contained within the declared data section. A parser should reject an asset if its data range starts outside the data section or extends past the end of the data section.
 
 **Description**
@@ -287,7 +291,7 @@ After applying these checks, the same `overflow_data_offset.bun` file should be 
 
 - ID: F-02
 - Category: Crash / excessive memory use
-- Spec reference: Section 9.2 -- asset names must lie within the declared string table
+- Spec reference: __
 - Assumptions: The `name_offset` and `name_length` fields are interpreted as values pointing into the string table. Although the name range must be inside the string table, a parser should also enforce a practical maximum asset name length before allocating memory to store the name.
 
 **Description**
@@ -453,11 +457,11 @@ if (name == NULL) {
 }
 ```
 
-## Finding F-03
+### Finding F-03
 
 - ID: F-03
 - Category: Incorrect output / invalid file accepted
-- Spec reference: Section 4.1 -- BUN header fields; reserved header field must be zero
+- Spec reference: __
 - Assumptions: The BUN specification requires the header `reserved` field to be set to zero. A parser should reject files where reserved fields contain non-zero values, because reserved fields are reserved for future use and should not contain arbitrary data in a valid BUN file.
 
 **Description**
@@ -654,17 +658,31 @@ if (header->reserved != 0) {
 
 After applying this check, the same `bad_reserved.bun` file should be rejected during header parsing instead of being printed as a valid BUN file. This would change the parser behaviour from accepting an invalid header to correctly returning `BUN_MALFORMED`.
 
-### Finding F- --
+### Finding F-04
 
-- ID: F- --
-- Category: [Crash / Excessive memory use / Hang / Incorrect output]
-- Spec reference: [e.g. Section 9.2 -- Sections lie within file]
-- Assumptions: [e.g. Any interpretation of the spec required for this to succeed]
+- ID: F-04
+- Category: Incorrect output
+- Spec reference: __
+- Assumptions: The parser validates RLE compressed data by accumulating the count values from each (count, value) pair and comparing the total to the declared uncompressed_size field. We assume the parser uses 64-bit unsigned integer (u64) arithmetic for this accumulation without explicit overflow checking. We interpret the spec to require that the parser correctly validate that the sum of RLE pair counts matches the declared uncompressed size, rejecting any file where they mismatch.
 
 **Description**
 
-[A clear, concise description of the flaw.]
+The target parser contains a potential integer overflow vulnerability in its RLE (Run-Length Encoding) data validation logic. The vulnerable code accumulates RLE pair counts without overflow detection:
+      `u64 total_uncompressed_size = 0;
 
+      // Read pairs and validate
+      for (u64 j = 0; j < num_pairs; j++) {
+        u8 rle_pair[2];
+        if (fread(rle_pair, 1, 2, ctx->file) != 2) {
+          add_error(ctx, "Failed to read RLE pair");
+          return BUN_ERR_IO;
+        }
+        if (rle_pair[0] == 0) {
+          add_error(ctx, "RLE count cannot be 0");
+          return BUN_MALFORMED;
+        }
+        total_uncompressed_size += rle_pair[0];
+      }`
 **Expected behaviour**
 
 [What a correct parser should do in this case, with reference to the spec.]

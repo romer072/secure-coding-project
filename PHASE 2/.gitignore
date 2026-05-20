@@ -1,7 +1,0 @@
-.*.swp
-*.pdf
-*.o
-*.zip
-bun_parser
-tests/test_runner
-*.bun
