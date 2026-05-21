@@ -72,24 +72,29 @@ For Phase 2, we prioritised a target that balanced realistic exploitability with
 
 ### Testing approach and tools
 
-We employed a systematic, code-review-driven approach to identify vulnerabilities across the mandatory parts of the BUN specification:
+We used code review, targeted malformed input generation, and repeatable reproduction to evaluate the parser.
 
-Code Review and Static Analysis
-
-- Manually reviewed the target parser source code (bun_parse.c, bun.h, main.c) to identify potential security flaws in critical code paths
-- Focused on areas involving arithmetic operations, memory allocation, bounds checking, and compression handling
-- Examined header validation logic (Section 4 of spec), asset record parsing (Section 5), and compression validation (Section 5.1)
+- Reviewed `bun_parse.c`, `bun.h`, and `main.c` for unsafe arithmetic, unchecked bounds, variable-sized allocation, and compression validation.
+- Used `bunfile_generator.py` to produce custom malformed fixtures for each finding.
+- Packaged all fixtures in the reproduction package and added dedicated Makefile targets for each test.
 
 Systematic Test Input Generation
 
-- Modified `bunfile_generator.py` to craft malformed BUN files targeting specific vulnerabilities:
-   - ``01overflow_data_offset``
-   - ``02huge_name_stack_crash``
-   - ``03bad_reserved``
-   - `04test_rle size_mistmatch_too_high`
-   -` 04test_rle size_mistmatch_too_low`
-   - ``05test_rle_zero_uncompressed``
+- Modified `bunfile_generator.py` to craft malformed BUN files targeting specific vulnerabilities
 
+Coverage by finding:
+
+- F-01: `01overflow_data_offset.bun`
+- F-02: `02huge_name_stack_crash.bun`
+- F-03: `03bad_reserved.bun`
+- F-04: `04test_rle_size_mismatch_too_high.bun`, `04test_rle_size_mismatch_too_low.bun`
+- F-05: `05test_rle_zero_uncompressed.bun`
+
+Sanitizer validation:
+
+- Built the parser with AddressSanitizer and UndefinedBehaviorSanitizer for all findings.
+- Verified F-01, F-03, F-04, and F-05 against the provided fixtures; these cases behaved as expected and did not trigger sanitizer failures.
+- Only F-02 triggered sanitizer-detected behaviour: a stack overflow on the insecure name allocation path.
 
 ## Findings
 
@@ -98,7 +103,7 @@ Systematic Test Input Generation
 
 - ID: F-01
 - Category: Incorrect output
-- Spec reference: ___
+- Spec reference: Section 9, Rule 5 (Asset names and data lie within respective sections)
 - Assumptions: The `data_offset` and `data_size` fields are interpreted as unsigned 64-bit values. The asset payload range is expected to be fully contained within the declared data section. A parser should reject an asset if its data range starts outside the data section or extends past the end of the data section.
 
 **Description**
@@ -168,36 +173,41 @@ The printed text begins with part of the asset name, `a_offset`, followed by pay
 
 **Reproduction steps**
 
-The following steps reproduce the issue from a clean checkout of the target parser.
+**Option 1: Using the Makefile**
 
-1. Build the target parser with the default project build command:
+The test file `01overflow_data_offset.bun` is already provided and included in the reproduction package.
+
+1. Navigate to the reproduction package directory.
+
+2. Build the target parser:
 
    ```sh
    make
    ```
 
-   If compiling manually, use:
+3. Run the reproduction test:
 
    ```sh
-   gcc -std=c11 -Wall -Wextra -g -o bun_parser bun_parse.c
+   make reproduce_f01
    ```
 
-2. Modify `bunfile_generator.py` so that it writes the malicious output file:
+**Option 2: Generating the test file with bunfile_generator.py**
+
+If you need to generate the test file from scratch:
+
+1. Build the target parser:
+
+   ```sh
+   make
+   ```
+
+2. Modify `bunfile_generator.py` to generate the overflow test file:
 
    ```python
    out_path = Path("overflow_data_offset.bun")
-   ```
+   malicious_data_offset = 0xfffffffffffffff8  # UINT64_MAX - 7
+   malicious_data_size = 16
 
-3. In `bunfile_generator.py`, define the malicious asset data range values:
-
-   ```python
-   malicious_data_offset = 0xfffffffffffffff8
-   malicious_data_size   = 16
-   ```
-
-4. Use the malicious values in the asset record:
-
-   ```python
    write_asset_record(
        f,
        name_offset = 0,
@@ -209,27 +219,17 @@ The following steps reproduce the issue from a clean checkout of the target pars
    )
    ```
 
-5. Generate the malformed BUN file:
+3. Generate the BUN file:
 
    ```sh
    python3 bunfile_generator.py
    ```
 
-   This should create:
-
-   ```text
-   overflow_data_offset.bun
-   ```
-
-6. Run the target parser on the generated file:
+4. Run the target parser on the generated file:
 
    ```sh
    ./bun_parser overflow_data_offset.bun
    ```
-
-Expected outcome: The parser should reject the file as malformed, returning `BUN_MALFORMED` or printing an error such as `Asset data range exceeds data section`.
-
-Actual outcome: The parser accepts the malformed file and prints a BUN summary containing the impossible data offset `18446744073709551608`. It also prints data from the wrong file section.
 
 The important reproduced output is:
 
@@ -261,39 +261,11 @@ Flags:                 0 (None)
 Data (text):           a_offsetABCDEFGH
 ```
 
-Alternatively, run `make reproduce_f1` in the reproduction package if the submitted package includes this target.
-
-**Suggested fix**
-
-The vulnerable addition-based check should be replaced with an overflow-safe range check that avoids adding `asset.data_offset` and `asset.data_size` directly:
-
-```c
-if (asset.data_offset > header->data_section_size ||
-    asset.data_size > header->data_section_size - asset.data_offset) {
-    add_error(ctx, "Asset data range exceeds data section");
-    return BUN_MALFORMED;
-}
-```
-
-The later real file offset calculation should also be protected before performing the addition:
-
-```c
-if (asset.data_offset > UINT64_MAX - header->data_section_offset) {
-    add_error(ctx, "Real data offset overflow");
-    return BUN_MALFORMED;
-}
-
-u64 real_data_offset = header->data_section_offset + asset.data_offset;
-```
-
-After applying these checks, the same `overflow_data_offset.bun` file should be rejected instead of parsed successfully.
-
-
 ### Finding F-02 Name Allocation Stack Overflow
 
 - ID: F-02
 - Category: Crash / excessive memory use
-- Spec reference: __
+- Spec reference: Section 5 (Asset Entry Table), Section 6 (String Table), and Section 9, Rule 5 (Asset names and data lie within respective sections)
 - Assumptions: The `name_offset` and `name_length` fields are interpreted as values pointing into the string table. Although the name range must be inside the string table, a parser should also enforce a practical maximum asset name length before allocating memory to store the name.
 
 **Description**
@@ -332,7 +304,7 @@ or another clear malformed-file error indicating that the asset name length exce
 
 The parser prints the header successfully, but then crashes before printing the asset record. This shows that the header and section layout are accepted, and the failure occurs while parsing the asset record. The crash is consistent with the parser attempting to allocate a stack buffer based on the file-controlled `name_length` value.
 
-In the reproduced test, the file declares a string table size of `16000000` bytes and an asset name length of `16000000` bytes. Because the declared name range fits inside the string table, the parser proceeds past the bounds check. It then reaches the vulnerable stack allocation and terminates with a segmentation fault.
+In the reproduced test, the file declares a string table size of `16000000` bytes and an asset name length of `16000000` bytes. Because the declared name range fits inside the string table, the parser proceeds past the bounds check and then triggers a stack overflow during asset parsing.
 
 The vulnerable operation is:
 
@@ -358,45 +330,61 @@ Data section offset:   16000108 bytes
 Data section size:     4 bytes
 Reserved:              0x0
 
-zsh: segmentation fault  ./bun_parser huge_name_stack_crash.bun
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==2557==ERROR: AddressSanitizer: stack-overflow on address 0x7ffec8e08c08 (pc 0x6337ce2e89cf bp 0x7ffec9606e30 sp 0x7ffec8e07c10 T0)
+    #0 0x6337ce2e89cf in bun_parse_assets /mnt/c/Users/rohma/Desktop/cits3007 secure coding/proj/phase 2/proj p2/PHASE 2/target/bun_parse.c:269
+    #1 0x6337ce2e4cf0 in main /mnt/c/Users/rohma/Desktop/cits3007 secure coding/proj/phase 2/proj p2/PHASE 2/target/main.c:44
+    #2 0x7cf13cc2a1c9  (/lib/x86_64-linux-gnu/libc.so.6+0x2a1c9)
+    #3 0x7cf13cc2a28a in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x2a28a)
+    #4 0x6337ce2e4524 in _start (/mnt/c/Users/rohma/Desktop/cits3007 secure coding/proj/phase 2/proj p2/PHASE 2/target/bun_parser+0xb524)
+
+SUMMARY: AddressSanitizer: stack-overflow /mnt/c/Users/rohma/Desktop/cits3007 secure coding/proj/phase 2/proj p2/PHASE 2/target/bun_parse.c:269 in bun_parse_assets
+==2557==ABORTING
 ```
 
-This demonstrates a concrete crash rather than only a theoretical issue.
+This demonstrates a concrete stack overflow detected by AddressSanitizer when the parser is built with ASan/UBSan.
 
 **Reproduction steps**
 
-The following steps reproduce the issue from a clean checkout of the target parser.
+**Option 1: Using the Makefile**
 
-1. Build the target parser with the default project build command:
+The test file `huge_name_stack_crash.bun` is already provided and included in the reproduction package.
 
-   ```sh
-   make
-   ```
+1. Navigate to the reproduction package directory.
 
-   If compiling manually, use:
+2. Build the target parser with ASan/UBSan:
 
    ```sh
-   gcc -std=c11 -Wall -Wextra -g -o bun_parser bun_parse.c
+   make reproduce
    ```
 
-2. Modify `bunfile_generator.py` so that it writes the malicious output file:
+3. Run the F-02 target:
+
+   ```sh
+   make reproduce_f02
+   ```
+
+**Option 2: Generating the test file with bunfile_generator.py**
+
+If you need to generate the test file from scratch:
+
+1. Build the target parser with ASan/UBSan:
+
+   ```sh
+   cd target
+   make clean && make CFLAGS="-std=c11 -Wall -Wextra -g -fsanitize=address,undefined -fno-omit-frame-pointer"
+   ```
+
+2. Modify `bunfile_generator.py` to generate the crash test file:
 
    ```python
    out_path = Path("huge_name_stack_crash.bun")
-   ```
-
-3. In `bunfile_generator.py`, define a very large asset name and a small valid payload:
-
-   ```python
    huge_name_length = 16_000_000
    asset_name = b"A" * huge_name_length
    asset_payload = b"DATA"
    asset_count = 1
-   ```
 
-4. Ensure the asset record uses the large name length and a normal uncompressed payload:
-
-   ```python
    write_asset_record(
        f,
        name_offset = 0,
@@ -408,62 +396,23 @@ The following steps reproduce the issue from a clean checkout of the target pars
    )
    ```
 
-5. Generate the malformed BUN file:
+3. Generate the malformed BUN file:
 
    ```sh
    python3 bunfile_generator.py
    ```
 
-   This should create:
-
-   ```text
-   huge_name_stack_crash.bun
-   ```
-
-6. Run the target parser on the generated file:
+4. Run the target parser on the generated file:
 
    ```sh
    ./bun_parser huge_name_stack_crash.bun
    ```
 
-Expected outcome: The parser should reject the file as malformed before allocating the name buffer, returning `BUN_MALFORMED` or printing an error such as `Asset name length is too large`.
-
-Actual outcome: The parser prints the header and then terminates with a segmentation fault:
-
-```text
-zsh: segmentation fault  ./bun_parser huge_name_stack_crash.bun
-```
-
-Alternatively, run `make reproduce_f2` in the reproduction package if the submitted package includes this target.
-
-**Suggested fix**
-
-The parser should enforce a maximum asset name length before allocating memory for the name. For example:
-
-```c
-#define MAX_NAME_LENGTH 4096
-
-if (asset.name_length > MAX_NAME_LENGTH) {
-    add_error(ctx, "Asset name length is too large");
-    return BUN_MALFORMED;
-}
-```
-
-If the parser needs to support longer names, it should still avoid variable-length stack allocation. A safer approach is to allocate on the heap after checking a reasonable maximum size:
-
-```c
-char *name = malloc((size_t)asset.name_length + 1);
-if (name == NULL) {
-    add_error(ctx, "Failed to allocate asset name");
-    return BUN_ERR_IO;
-}
-```
-
 ### Finding F-03 Reserved Field Validation
 
 - ID: F-03
 - Category: Incorrect output / invalid file accepted
-- Spec reference: __
+- Spec reference: Section 4.1, Note 6 (Reserved field contents are ignored)
 - Assumptions: The BUN specification requires the header `reserved` field to be set to zero. A parser should reject files where reserved fields contain non-zero values, because reserved fields are reserved for future use and should not contain arbitrary data in a valid BUN file.
 
 **Description**
@@ -535,35 +484,40 @@ This confirms that the parser accepts an invalid reserved header field instead o
 
 **Reproduction steps**
 
-The following steps reproduce the issue from a clean checkout of the target parser using the original `bunfile_generator.py` script.
+**Option 1: Using the Makefile**
 
-1. Build the target parser with the default project build command:
+The test file `bad_reserved.bun` is already provided and included in the reproduction package.
+
+1. Navigate to the reproduction package directory.
+
+2. Build the target parser:
 
    ```sh
    make
    ```
 
-   If compiling manually, use:
+3. Run the reproduction test:
 
    ```sh
-   gcc -std=c11 -Wall -Wextra -g -o bun_parser bun_parse.c
+   make reproduce_f03
    ```
 
-2. Modify `bunfile_generator.py` so that it writes the malicious output file:
+**Option 2: Generating the test file with bunfile_generator.py**
+
+If you need to generate the test file from scratch:
+
+1. Build the target parser:
+
+   ```sh
+   make
+   ```
+
+2. Modify `bunfile_generator.py` to generate the reserved-field test file:
 
    ```python
    out_path = Path("bad_reserved.bun")
-   ```
-
-3. In `bunfile_generator.py`, define a non-zero reserved header value:
-
-   ```python
    bad_reserved_value = 0x12345678
-   ```
 
-4. In the call to `write_header`, pass the non-zero reserved value:
-
-   ```python
    write_header(
        f,
        asset_count         = asset_count,
@@ -576,7 +530,7 @@ The following steps reproduce the issue from a clean checkout of the target pars
    )
    ```
 
-5. Keep the asset record as a simple valid uncompressed asset. This ensures that the only malformed part of the file is the non-zero reserved header field:
+3. Keep the asset record as a simple valid uncompressed asset:
 
    ```python
    asset_name = b"bad_reserved"
@@ -593,7 +547,7 @@ The following steps reproduce the issue from a clean checkout of the target pars
    )
    ```
 
-6. Generate the malformed BUN file:
+4. Generate the malformed BUN file:
 
    ```sh
    python3 bunfile_generator.py
@@ -605,15 +559,11 @@ The following steps reproduce the issue from a clean checkout of the target pars
    bad_reserved.bun
    ```
 
-7. Run the target parser on the generated file:
+5. Run the target parser on the generated file:
 
    ```sh
    ./bun_parser bad_reserved.bun
    ```
-
-Expected outcome: The parser should reject the file as malformed, returning `BUN_MALFORMED` or printing an error such as `Reserved field must be zero`.
-
-Actual outcome: The parser accepts the malformed file and prints a normal BUN summary containing the invalid reserved value `0x12345678`.
 
 The important reproduced output is:
 
@@ -645,85 +595,89 @@ Flags:                 0 (None)
 Data (text):           DATA
 ```
 
-Alternatively, run `make reproduce_f3` in the reproduction package if the submitted package includes this target.
-
-**Suggested fix**
-
-The parser should validate the reserved header field immediately after reading the header fields and before accepting the header as valid:
-
-```c
-if (header->reserved != 0) {
-    add_error(ctx, "Reserved field must be zero");
-    return BUN_MALFORMED;
-}
-```
-
-After applying this check, the same `bad_reserved.bun` file should be rejected during header parsing instead of being printed as a valid BUN file. This would change the parser behaviour from accepting an invalid header to correctly returning `BUN_MALFORMED`.
-
 ### Finding F-04 Size Mismatch RLE Integer Overflow
 
 - ID: F-04
-- Category: Incorrect output
+- Category: Incorrect output / theoretical overflow
 - Spec reference: Section 5.1 (RLE Compression Format)
 - Assumptions: The parser validates RLE compressed data by accumulating count values from each (count, value) pair and comparing the total to the declared `uncompressed_size` field. The parser uses u64 arithmetic without explicit overflow checking. We interpret the spec to require that the parser correctly validate that the sum of RLE pair counts matches the declared uncompressed size.
 
 **Description**
 
-The target parser contains a potential integer overflow vulnerability in its RLE validation logic. The code accumulates RLE pair counts without overflow detection. While theoretically possible (would require a 2^64 byte file), practical exploitation is infeasible on current systems. This represents a missing defensive check in secure coding practice.
+The target parser contains a potential integer overflow weakness in its RLE validation logic. It accumulates RLE pair counts using unsigned 64-bit arithmetic without checking for wraparound. In theory, this could be exploited only by an RLE payload whose total count exceeds 2^64, which is not practically attainable in this project context.
+
+Because the problematic condition cannot be reached with any realistic test file, the parser was assessed as having passed this finding based on available test cases and practical constraints.
 
 **Expected behaviour**
 
-Parser should validate RLE files by accumulating pair counts and rejecting files where the accumulated count does not match `uncompressed_size`.
+A secure parser should detect or prevent overflow while accumulating RLE counts, and it should reject files whose computed total does not match `uncompressed_size`.
 
 **Actual behaviour**
 
-Parser correctly detects and rejects RLE files with mismatched uncompressed_size in both directions:
+The parser correctly rejects the available RLE mismatch test fixtures:
 
-`test_rle_size_mismatch_too_high.bun`: Declared (300,000) > actual (255,000) → Rejected, exit 1
-`test_rle_size_mismatch_too_low.bun`: Declared (100,000) < actual (255,000) → Rejected, exit 1
+- `04test_rle_size_mismatch_too_high.bun`: Declared uncompressed size is larger than the actual decompressed content, and the parser rejects it.
+- `04test_rle_size_mismatch_too_low.bun`: Declared uncompressed size is smaller than the actual decompressed content, and the parser rejects it.
+
+Because the only remaining weakness is theoretical and requires an impractical file size, our group
+deemed this finding passed for the evaluated parser.
 
 **Reproduction steps**
 
-1. Build the target parser: `make`
-2. Test: `./bun_parser test_rle_size_mismatch_too_high.bun`
-- Expected outcome: Exit code 1, error "Mismatch between RLE contents and the expected uncompressed size"
-3. Test: `./bun_parser test_rle_size_mismatch_too_low.bun`
-- Expected outcome: Exit code 1, error "Mismatch between RLE contents and the expected uncompressed size"
+**Using the Makefile**
 
-### F-05: RLE Zero Uncompressed Size - Vulnerability Successfully Mitigated
+1. Navigate to the reproduction package directory.
+2. Build the target parser:
+
+   ```sh
+   make
+   ```
+3. Run the reproduction tests:
+
+   ```sh
+   make reproduce_f04
+   ```
+
+   Practical exploitation of the theoretical overflow is not possible within the available test suite or the project’s realistic file-size constraints.
+
+### F-05: RLE Zero Uncompressed Size
 
 - ID: F-05
-- Category: Incorrect output (mitigation verification)
+- Category: Incorrect output / mitigation verification
 - Spec reference: Section 5.1 (RLE Compression Format)
-- Assumptions: The BUN specification requires that RLE-compressed assets have a valid `uncompressed_size` > 0. We tested whether the parser properly validates this requirement and rejects RLE assets with `uncompressed_size` = 0.
+- Assumptions: The BUN specification requires that RLE-compressed assets have a valid `uncompressed_size` > 0. We tested whether the parser rejects RLE assets when the declared `uncompressed_size` is zero.
 
 **Description**
 
-We investigated a potential vulnerability where a malicious BUN file could contain RLE-compressed data with `uncompressed_size` set to 0, violating the specification. We sought to determine whether the parser would incorrectly accept such a file or successfully reject it as invalid.
+We evaluated a malformed RLE asset with `uncompressed_size = 0` to verify whether the parser treats it as invalid. This is a practical validation test rather than a theoretical overflow issue, and it checks whether the parser rejects clearly malformed RLE metadata.
 
 **Expected behaviour**
 
-A properly implemented parser should reject RLE-compressed assets where `uncompressed_size` is 0, since the specification requires this field to be greater than 0 for valid RLE compression. The parser should return `BUN_MALFORMED` and display an appropriate error.
+A properly implemented parser should reject the file as malformed and return `BUN_MALFORMED` instead of accepting or processing the RLE data.
 
 **Actual behaviour**
 
-The parser successfully mitigates this vulnerability. Through its RLE validation logic, it correctly rejects files with zero uncompressed_size:
-
-- `test_rle_zero_uncompressed.bun`: File with declared uncompressed_size = 0 and RLE compression type → Successfully rejected, exit code 1 ✓
-
-The parser catches the violation through its accumulated pair count validation: when `uncompressed_size` is declared as 0 but RLE pairs are present, the accumulated count (> 0) does not match the declared size (0), triggering the mismatch error.
+The parser rejects the available fixture `05test_rle_zero_uncompressed.bun`, demonstrating correct handling for this malformed RLE case. Because the parser already rejects this invalid input in the provided test suite, this finding is considered passed.
 
 **Reproduction steps**
 
-1. Build the target parser: `make`
-2. Test zero uncompressed_size handling: `./bun_parser test_rle_zero_uncompressed.bun`
-- Expected outcome: Exit code 1, error message "Mismatch between RLE contents and the expected uncompressed size"
-- Actual outcome: Parser correctly rejects the file
+**Using the Makefile**
 
+1. Navigate to the reproduction package directory.
+2. Build the target parser:
+
+   ```sh
+   make
+   ```
+3. Run the reproduction tests:
+
+   ```sh
+   make reproduce_f05
+   ```
 
 ## Conclusion
 
-We identified four security vulnerabilities in the target parser across multiple categories and specification areas:
+We identified three security vulnerabilities in the target parser across multiple categories and specification areas:
 - F-01: Integer Overflow in Data Offset Validation (Incorrect output)
    - Vulnerability in offset arithmetic without overflow checking
 
@@ -733,9 +687,21 @@ We identified four security vulnerabilities in the target parser across multiple
 - F-03: Missing Reserved Header Field Validation (Incorrect output)
    - Parser accepts non-zero reserved field values
 
+And tested for two more security vulnerabilities that were accounted for by the target group's code:
+
 - F-04: RLE Integer Overflow - Potential Overflow in Accumulation (Incorrect output)
 
    - Vulnerability in RLE pair count accumulation without overflow protection
    - Theoretical issue (would require 2^64 byte file); parser correctly validates all practical test cases
 
-Recommendations to the target group are welcome but not required.]
+- F-05: RLE Zero Uncompressed Size
+
+   - Verified mitigated: parser rejects zero uncompressed size RLE input in the provided test fixture
+
+### Suggested fixes
+
+- F-01: Replace overflow-prone data-range checks with boundary-safe comparisons and protect the real data offset calculation from unsigned wraparound.
+- F-02: Enforce a maximum asset name length before allocation and avoid variable-length stack buffers for file-controlled sizes.
+- F-03: Reject headers with non-zero reserved values during validation rather than accepting them as valid.
+- F-04: Add explicit overflow checks when accumulating RLE run lengths, and validate RLE pair counts before accepting compressed asset metadata.
+- F-05: Enforce RLE constraints such as non-zero uncompressed_size and reject malformed compressed payloads early in parsing.
