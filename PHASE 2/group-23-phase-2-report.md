@@ -11,31 +11,6 @@ margin:
 lang: en
 papersize: a4
 section-numbering: "1.1.1."
-header-includes: |
-  ```{=typst}
-  // if you are using Typst, we provide some rules here which can slightly improve
-  // the appearance -- but you can remove them or comment them out with C style comments
-  // if you wish.
-
-  // more space under headings
-  #show heading: set block(below: 1.2em)
-
-  // use en-dashes for all bullets
-  #set list(marker: [--])
-
-  // blue links
-  #let blueish = rgb("#0000ff")
-  #show link: set text(fill: blueish)
-
-  #set text(
-    historical-ligatures: false,
-  )
-
-  // if we shift heading by -1, slightly less loud heading sizes
-  #show heading.where(level: 1): set text(size: 14pt)
-  #show heading.where(level: 2): set text(size: 12pt)
-
-  ```
 ---
 # CITS3007 Phase 2 Findings Report
 
